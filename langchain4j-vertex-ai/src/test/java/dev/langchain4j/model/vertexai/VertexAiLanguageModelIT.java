@@ -1,21 +1,19 @@
 package dev.langchain4j.model.vertexai;
 
-import dev.langchain4j.model.output.Response;
-import dev.langchain4j.model.output.TokenUsage;
-import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.Test;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
-@Disabled("To run this test, you must provide your own endpoint, project and location")
+import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.output.TokenUsage;
+import org.junit.jupiter.api.Test;
+
 class VertexAiLanguageModelIT {
 
     @Test
-    void testLanguageModel() {
+    void languageModel() {
         VertexAiLanguageModel vertexAiLanguageModel = VertexAiLanguageModel.builder()
-                .endpoint("us-central1-aiplatform.googleapis.com:443")
-                .project("langchain4j")
-                .location("us-central1")
+                .endpoint(System.getenv("GCP_VERTEXAI_ENDPOINT"))
+                .project(System.getenv("GCP_PROJECT_ID"))
+                .location(System.getenv("GCP_LOCATION"))
                 .publisher("google")
                 .modelName("text-bison@001")
                 .temperature(0.2)
@@ -28,7 +26,6 @@ class VertexAiLanguageModelIT {
         Response<String> response = vertexAiLanguageModel.generate("hi, what is java?");
 
         assertThat(response.content()).containsIgnoringCase("java");
-        System.out.println(response);
 
         TokenUsage tokenUsage = response.tokenUsage();
         assertThat(tokenUsage.inputTokenCount()).isEqualTo(6);

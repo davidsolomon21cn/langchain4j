@@ -3,21 +3,23 @@ package dev.langchain4j.store.embedding.inmemory;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.embedding.AllMiniLmL6V2QuantizedEmbeddingModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.onnx.allminilml6v2q.AllMiniLmL6V2QuantizedEmbeddingModel;
+import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingStore;
-import dev.langchain4j.store.embedding.EmbeddingStoreIT;
+import dev.langchain4j.store.embedding.EmbeddingStoreWithFilteringIT;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
-class InMemoryEmbeddingStoreTest extends EmbeddingStoreIT {
+class InMemoryEmbeddingStoreTest extends EmbeddingStoreWithFilteringIT {
 
     @TempDir
     Path temporaryDirectory;
@@ -34,8 +36,9 @@ class InMemoryEmbeddingStoreTest extends EmbeddingStoreIT {
         String json = originalEmbeddingStore.serializeToJson();
         InMemoryEmbeddingStore<TextSegment> deserializedEmbeddingStore = InMemoryEmbeddingStore.fromJson(json);
 
-        assertThat(deserializedEmbeddingStore.entries).isEqualTo(originalEmbeddingStore.entries);
-        assertThat(deserializedEmbeddingStore.entries).isInstanceOf(CopyOnWriteArrayList.class);
+        assertThat(deserializedEmbeddingStore.entries)
+                .isEqualTo(originalEmbeddingStore.entries)
+                .isInstanceOf(CopyOnWriteArrayList.class);
     }
 
     @Test
@@ -63,16 +66,47 @@ class InMemoryEmbeddingStoreTest extends EmbeddingStoreIT {
 
             assertThat(deserializedEmbeddingStore.entries)
                     .isEqualTo(originalEmbeddingStore.entries)
-                            .hasSameHashCodeAs(originalEmbeddingStore.entries);
+                    .hasSameHashCodeAs(originalEmbeddingStore.entries);
             assertThat(deserializedEmbeddingStore.entries).isInstanceOf(CopyOnWriteArrayList.class);
         }
         {
             originalEmbeddingStore.serializeToFile(filePath.toString());
             InMemoryEmbeddingStore<TextSegment> deserializedEmbeddingStore = InMemoryEmbeddingStore.fromFile(filePath);
 
-            assertThat(deserializedEmbeddingStore.entries).isEqualTo(originalEmbeddingStore.entries);
-            assertThat(deserializedEmbeddingStore.entries).isInstanceOf(CopyOnWriteArrayList.class);
+            assertThat(deserializedEmbeddingStore.entries)
+                    .isEqualTo(originalEmbeddingStore.entries)
+                    .isInstanceOf(CopyOnWriteArrayList.class);
         }
+    }
+
+    @Test
+    void should_merge_multiple_stores() {
+
+        // given
+        InMemoryEmbeddingStore<TextSegment> store1 = new InMemoryEmbeddingStore<>();
+        TextSegment segment1 = TextSegment.from("first", Metadata.from("first-key", "first-value"));
+        Embedding embedding1 = embeddingModel.embed(segment1).content();
+        store1.add("1", embedding1, segment1);
+
+        InMemoryEmbeddingStore<TextSegment> store2 = new InMemoryEmbeddingStore<>();
+        TextSegment segment2 = TextSegment.from("second", Metadata.from("second-key", "second-value"));
+        Embedding embedding2 = embeddingModel.embed(segment2).content();
+        store2.add("2", embedding2, segment2);
+
+        // when
+        InMemoryEmbeddingStore<TextSegment> merged = InMemoryEmbeddingStore.merge(store1, store2);
+
+        // then
+        List<EmbeddingMatch<TextSegment>> matches = merged.findRelevant(embedding1, 100);
+        assertThat(matches).hasSize(2);
+
+        assertThat(matches.get(0).embeddingId()).isEqualTo("1");
+        assertThat(matches.get(0).embedding()).isEqualTo(embedding1);
+        assertThat(matches.get(0).embedded()).isEqualTo(segment1);
+
+        assertThat(matches.get(1).embeddingId()).isEqualTo("2");
+        assertThat(matches.get(1).embedding()).isEqualTo(embedding2);
+        assertThat(matches.get(1).embedded()).isEqualTo(segment2);
     }
 
     private InMemoryEmbeddingStore<TextSegment> createEmbeddingStore() {
@@ -98,5 +132,10 @@ class InMemoryEmbeddingStoreTest extends EmbeddingStoreIT {
     @Override
     protected EmbeddingModel embeddingModel() {
         return embeddingModel;
+    }
+
+    @Override
+    protected boolean supportsContains() {
+        return true;
     }
 }

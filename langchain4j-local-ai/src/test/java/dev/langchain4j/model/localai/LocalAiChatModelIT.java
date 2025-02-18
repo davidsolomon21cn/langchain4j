@@ -13,11 +13,11 @@ import static dev.langchain4j.model.output.FinishReason.STOP;
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class LocalAiChatModelIT extends AbstractLocalAiInfrastructure {
+class LocalAiChatModelIT {
 
     ChatLanguageModel model = LocalAiChatModel.builder()
-            .baseUrl(localAi.getBaseUrl())
-            .modelName("ggml-gpt4all-j")
+            .baseUrl("http://localhost:8082/v1")
+            .modelName("gpt-4")
             .maxTokens(3)
             .logRequests(true)
             .logResponses(true)
@@ -31,7 +31,6 @@ class LocalAiChatModelIT extends AbstractLocalAiInfrastructure {
 
         // when
         String response = model.generate(userMessage);
-        System.out.println(response);
 
         // then
         assertThat(response).isNotBlank();
@@ -45,7 +44,6 @@ class LocalAiChatModelIT extends AbstractLocalAiInfrastructure {
 
         // when
         Response<AiMessage> response = model.generate(messages);
-        System.out.println(response);
 
         // then
         AiMessage aiMessage = response.content();

@@ -1,8 +1,15 @@
 package dev.langchain4j.model.input;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
-import java.time.*;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -164,5 +171,35 @@ class PromptTemplateTest {
 
         // then
         assertThat(prompt.text()).isEqualTo("My name is Klaus and now is " + LocalDateTime.now(clock));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "$",
+            "$$",
+            "{",
+            "{{",
+            "}",
+            "}}",
+            "{}",
+            "{{}}",
+            "*",
+            "**",
+            "\\",
+            "\\\\",
+            "${}*\\",
+            "${ *hello* }",
+            "\\$\\{ \\*hello\\* \\}"
+    })
+    void should_support_special_characters(String s) {
+
+        // given
+        PromptTemplate promptTemplate = PromptTemplate.from("This is {{it}}.");
+
+        // when
+        Prompt prompt = promptTemplate.apply(s);
+
+        // then
+        assertThat(prompt.text()).isEqualTo("This is " + s + ".");
     }
 }

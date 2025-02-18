@@ -1,8 +1,11 @@
 package dev.langchain4j.data.document.source;
 
+import static dev.langchain4j.data.document.Document.ABSOLUTE_DIRECTORY_PATH;
+import static dev.langchain4j.data.document.Document.FILE_NAME;
+import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
+
 import dev.langchain4j.data.document.DocumentSource;
 import dev.langchain4j.data.document.Metadata;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,13 +14,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static dev.langchain4j.data.document.Document.ABSOLUTE_DIRECTORY_PATH;
-import static dev.langchain4j.data.document.Document.FILE_NAME;
-import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
-
 public class FileSystemSource implements DocumentSource {
 
-    public final Path path;
+    private final Path path;
 
     public FileSystemSource(Path path) {
         this.path = ensureNotNull(path, "path");
@@ -31,8 +30,8 @@ public class FileSystemSource implements DocumentSource {
     @Override
     public Metadata metadata() {
         return new Metadata()
-                .add(FILE_NAME, path.getFileName().toString())
-                .add(ABSOLUTE_DIRECTORY_PATH, path.getParent().toAbsolutePath().toString());
+                .put(FILE_NAME, path.getFileName().toString())
+                .put(ABSOLUTE_DIRECTORY_PATH, path.toAbsolutePath().getParent().toString());
     }
 
     public static FileSystemSource from(Path filePath) {

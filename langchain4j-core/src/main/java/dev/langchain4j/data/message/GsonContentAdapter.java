@@ -1,6 +1,12 @@
 package dev.langchain4j.data.message;
 
-import com.google.gson.*;
+import com.google.gson.Gson;
+import com.google.gson.JsonDeserializationContext;
+import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonSerializationContext;
+import com.google.gson.JsonSerializer;
 
 import java.lang.reflect.Type;
 
@@ -18,7 +24,7 @@ class GsonContentAdapter implements JsonDeserializer<Content>, JsonSerializer<Co
     }
 
     @Override
-    public Content deserialize(JsonElement contentJsonElement, Type ignored, JsonDeserializationContext context) throws JsonParseException {
+    public Content deserialize(JsonElement contentJsonElement, Type ignored, JsonDeserializationContext context) {
         String contentTypeString = contentJsonElement.getAsJsonObject().get(CONTENT_TYPE).getAsString();
         ContentType contentType = ContentType.valueOf(contentTypeString);
         return GSON.fromJson(contentJsonElement, contentType.getContentClass());
