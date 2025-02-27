@@ -1,6 +1,7 @@
 package dev.langchain4j.internal;
 
 import java.util.Collection;
+import java.util.Map;
 import java.util.Objects;
 
 import static dev.langchain4j.internal.Exceptions.illegalArgument;
@@ -68,6 +69,40 @@ public class ValidationUtils {
     }
 
     /**
+     * Ensures that the given array is not null and not empty.
+     * @param array The array to check.
+     * @param name The name of the array to be used in the exception message.
+     * @return The array if it is not null and not empty.
+     * @param <T> The component type of the array.
+     * @throws IllegalArgumentException if the array is null or empty.
+     */
+    public static <T> T[] ensureNotEmpty(T[] array, String name) {
+        if (array == null || array.length == 0) {
+            throw illegalArgument("%s cannot be null or empty", name);
+        }
+
+        return array;
+    }
+
+    /**
+     * Ensures that the given map is not null and not empty.
+     *
+     * @param map  The map to check.
+     * @param name The name of the map to be used in the exception message.
+     * @param <K>  The type of the key.
+     * @param <V>  The type of the value.
+     * @return The map if it is not null and not empty.
+     * @throws IllegalArgumentException if the collection is null or empty.
+     */
+    public static <K, V> Map<K, V> ensureNotEmpty(Map<K, V> map, String name) {
+        if (map == null || map.isEmpty()) {
+            throw illegalArgument("%s cannot be null or empty", name);
+        }
+
+        return map;
+    }
+
+    /**
      * Ensures that the given string is not null and not blank.
      * @param string The string to check.
      * @param name The name of the string to be used in the exception message.
@@ -102,6 +137,21 @@ public class ValidationUtils {
      * @throws IllegalArgumentException if the expression is false.
      */
     public static int ensureGreaterThanZero(Integer i, String name) {
+        if (i == null || i <= 0) {
+            throw illegalArgument("%s must be greater than zero, but is: %s", name, i);
+        }
+
+        return i;
+    }
+
+    /**
+     * Ensures that the given expression is true.
+     * @param i The expression to check.
+     * @param name The message to be used in the exception.
+     * @return The value if it is greater than zero.
+     * @throws IllegalArgumentException if the expression is false.
+     */
+    public static double ensureGreaterThanZero(Double i, String name) {
         if (i == null || i <= 0) {
             throw illegalArgument("%s must be greater than zero, but is: %s", name, i);
         }

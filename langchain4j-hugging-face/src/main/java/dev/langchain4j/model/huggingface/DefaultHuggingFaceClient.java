@@ -1,29 +1,28 @@
 package dev.langchain4j.model.huggingface;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
+import static dev.langchain4j.internal.ValidationUtils.ensureNotBlank;
+
 import dev.langchain4j.model.huggingface.client.EmbeddingRequest;
 import dev.langchain4j.model.huggingface.client.HuggingFaceClient;
 import dev.langchain4j.model.huggingface.client.TextGenerationRequest;
 import dev.langchain4j.model.huggingface.client.TextGenerationResponse;
-import okhttp3.OkHttpClient;
-import retrofit2.Response;
-import retrofit2.Retrofit;
-import retrofit2.converter.gson.GsonConverterFactory;
-
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
-
-import static com.google.gson.FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES;
-import static dev.langchain4j.internal.ValidationUtils.ensureNotBlank;
+import java.util.Objects;
+import okhttp3.OkHttpClient;
+import retrofit2.Response;
+import retrofit2.Retrofit;
+import retrofit2.converter.jackson.JacksonConverterFactory;
 
 class DefaultHuggingFaceClient implements HuggingFaceClient {
+
+    private static final String BASE_URL = "https://api-inference.huggingface.co/";
 
     private final HuggingFaceApi huggingFaceApi;
     private final String modelId;
 
-    DefaultHuggingFaceClient(String apiKey, String modelId, Duration timeout) {
+    DefaultHuggingFaceClient(String baseUrl, String apiKey, String modelId, Duration timeout) {
 
         OkHttpClient okHttpClient = new OkHttpClient.Builder()
                 .addInterceptor(new ApiKeyInsertingInterceptor(apiKey))
@@ -33,14 +32,10 @@ class DefaultHuggingFaceClient implements HuggingFaceClient {
                 .writeTimeout(timeout)
                 .build();
 
-        Gson gson = new GsonBuilder()
-                .setFieldNamingPolicy(LOWER_CASE_WITH_UNDERSCORES)
-                .create();
-
         Retrofit retrofit = new Retrofit.Builder()
-                .baseUrl("https://api-inference.huggingface.co")
+                .baseUrl(Objects.isNull(baseUrl) ? BASE_URL : baseUrl)
                 .client(okHttpClient)
-                .addConverterFactory(GsonConverterFactory.create(gson))
+                .addConverterFactory(JacksonConverterFactory.create())
                 .build();
 
         this.huggingFaceApi = retrofit.create(HuggingFaceApi.class);
@@ -55,8 +50,8 @@ class DefaultHuggingFaceClient implements HuggingFaceClient {
     @Override
     public TextGenerationResponse generate(TextGenerationRequest request) {
         try {
-            retrofit2.Response<List<TextGenerationResponse>> retrofitResponse
-                    = huggingFaceApi.generate(request, modelId).execute();
+            retrofit2.Response<List<TextGenerationResponse>> retrofitResponse =
+                    huggingFaceApi.generate(request, modelId).execute();
 
             if (retrofitResponse.isSuccessful()) {
                 return toOneResponse(retrofitResponse);
@@ -73,14 +68,16 @@ class DefaultHuggingFaceClient implements HuggingFaceClient {
         if (responses != null && responses.size() == 1) {
             return responses.get(0);
         } else {
-            throw new RuntimeException("Expected only one generated_text, but was: " + (responses == null ? 0 : responses.size()));
+            throw new RuntimeException(
+                    "Expected only one generated_text, but was: " + (responses == null ? 0 : responses.size()));
         }
     }
 
     @Override
     public List<float[]> embed(EmbeddingRequest request) {
         try {
-            retrofit2.Response<List<float[]>> retrofitResponse = huggingFaceApi.embed(request, modelId).execute();
+            Response<List<float[]>> retrofitResponse =
+                    huggingFaceApi.embed(request, modelId).execute();
             if (retrofitResponse.isSuccessful()) {
                 return retrofitResponse.body();
             } else {

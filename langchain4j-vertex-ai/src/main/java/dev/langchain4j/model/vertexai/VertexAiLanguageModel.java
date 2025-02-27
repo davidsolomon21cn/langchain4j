@@ -9,15 +9,17 @@ import com.google.protobuf.util.JsonFormat;
 import dev.langchain4j.model.language.LanguageModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.output.TokenUsage;
+import dev.langchain4j.model.vertexai.spi.VertexAiLanguageModelBuilderFactory;
 
 import java.io.IOException;
 import java.util.List;
 
 import static com.google.protobuf.Value.newBuilder;
-import static dev.langchain4j.internal.Json.toJson;
 import static dev.langchain4j.internal.RetryUtils.withRetry;
 import static dev.langchain4j.internal.ValidationUtils.ensureNotBlank;
+import static dev.langchain4j.model.vertexai.Json.toJson;
 import static dev.langchain4j.model.vertexai.VertexAiChatModel.extractTokenCount;
+import static dev.langchain4j.spi.ServiceHelper.loadFactories;
 import static java.util.Collections.singletonList;
 
 /**
@@ -109,6 +111,9 @@ public class VertexAiLanguageModel implements LanguageModel {
     }
 
     public static Builder builder() {
+        for (VertexAiLanguageModelBuilderFactory factory : loadFactories(VertexAiLanguageModelBuilderFactory.class)) {
+            return factory.get();
+        }
         return new Builder();
     }
 

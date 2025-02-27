@@ -1,24 +1,22 @@
 package dev.langchain4j.model.vertexai;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.output.TokenUsage;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-@Disabled("To run this test, you must provide your own endpoint, project and location")
 class VertexAiChatModelIT {
 
     @Test
-    void testChatModel() {
+    void chatModel() {
 
         VertexAiChatModel vertexAiChatModel = VertexAiChatModel.builder()
-                .endpoint("us-central1-aiplatform.googleapis.com:443")
-                .project("langchain4j")
-                .location("us-central1")
+                .endpoint(System.getenv("GCP_VERTEXAI_ENDPOINT"))
+                .project(System.getenv("GCP_PROJECT_ID"))
+                .location(System.getenv("GCP_LOCATION"))
                 .publisher("google")
                 .modelName("chat-bison@001")
                 .temperature(1.0)
@@ -29,7 +27,6 @@ class VertexAiChatModelIT {
                 .build();
 
         Response<AiMessage> response = vertexAiChatModel.generate(UserMessage.from("hi, how are you doing?"));
-        System.out.println(response);
 
         assertThat(response.content().text()).isNotBlank();
 

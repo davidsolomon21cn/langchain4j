@@ -5,7 +5,7 @@ import java.util.Objects;
 import static dev.langchain4j.internal.Utils.quoted;
 
 /**
- * Represents a request to execute a tool.
+ * Represents an LLM-generated request to execute a tool.
  */
 public class ToolExecutionRequest {
     private final String id;
@@ -49,8 +49,8 @@ public class ToolExecutionRequest {
     @Override
     public boolean equals(Object another) {
         if (this == another) return true;
-        return another instanceof ToolExecutionRequest
-                && equalTo((ToolExecutionRequest) another);
+        return another instanceof ToolExecutionRequest ter
+                && equalTo(ter);
     }
 
     private boolean equalTo(ToolExecutionRequest another) {

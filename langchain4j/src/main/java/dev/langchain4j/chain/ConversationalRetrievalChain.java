@@ -7,99 +7,188 @@ import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.input.PromptTemplate;
+import dev.langchain4j.rag.AugmentationRequest;
+import dev.langchain4j.rag.AugmentationResult;
+import dev.langchain4j.rag.DefaultRetrievalAugmentor;
+import dev.langchain4j.rag.RetrievalAugmentor;
+import dev.langchain4j.rag.content.injector.DefaultContentInjector;
+import dev.langchain4j.rag.content.retriever.ContentRetriever;
+import dev.langchain4j.rag.query.Metadata;
 import dev.langchain4j.retriever.Retriever;
-import lombok.Builder;
+import dev.langchain4j.service.AiServices;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static dev.langchain4j.internal.ValidationUtils.ensureNotBlank;
+import static dev.langchain4j.internal.Utils.getOrDefault;
 import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
-import static java.util.stream.Collectors.joining;
 
 /**
- * A chain for interacting with a specified {@link ChatLanguageModel} based on the information provided by a specified {@link Retriever}.
- * Includes a default {@link PromptTemplate}, which can be overridden.
+ * A chain for conversing with a specified {@link ChatLanguageModel}
+ * based on the information retrieved by a specified {@link ContentRetriever}.
  * Includes a default {@link ChatMemory} (a message window with maximum 10 messages), which can be overridden.
+ * You can fully customize RAG behavior by providing an instance of a {@link RetrievalAugmentor},
+ * such as {@link DefaultRetrievalAugmentor}, or your own custom implementation.
+ * <br>
+ * Chains are not going to be developed further, it is recommended to use {@link AiServices} instead.
  */
 public class ConversationalRetrievalChain implements Chain<String, String> {
 
-    private static final PromptTemplate DEFAULT_PROMPT_TEMPLATE = PromptTemplate.from(
-            "Answer the following question to the best of your ability: {{question}}\n" +
-                    "\n" +
-                    "Base your answer on the following information:\n" +
-                    "{{information}}");
-
     private final ChatLanguageModel chatLanguageModel;
     private final ChatMemory chatMemory;
-    private final PromptTemplate promptTemplate;
-    private final Retriever<TextSegment> retriever;
+    private final RetrievalAugmentor retrievalAugmentor;
 
-    private final List<String> metadataKeysToInclude;
+    public ConversationalRetrievalChain(ChatLanguageModel chatLanguageModel,
+                                        ChatMemory chatMemory,
+                                        ContentRetriever contentRetriever) {
+        this(
+                chatLanguageModel,
+                chatMemory,
+                DefaultRetrievalAugmentor.builder()
+                        .contentRetriever(contentRetriever)
+                        .build()
+        );
+    }
 
-    @Builder
+    public ConversationalRetrievalChain(ChatLanguageModel chatLanguageModel,
+                                        ChatMemory chatMemory,
+                                        RetrievalAugmentor retrievalAugmentor) {
+        this.chatLanguageModel = ensureNotNull(chatLanguageModel, "chatLanguageModel");
+        this.chatMemory = getOrDefault(chatMemory, () -> MessageWindowChatMemory.withMaxMessages(10));
+        this.retrievalAugmentor = ensureNotNull(retrievalAugmentor, "retrievalAugmentor");
+    }
+
+    /**
+     * @deprecated Please use another constructor with a new {@link ContentRetriever} instead.
+     */
+    @Deprecated(forRemoval = true)
     public ConversationalRetrievalChain(ChatLanguageModel chatLanguageModel,
                                         ChatMemory chatMemory,
                                         PromptTemplate promptTemplate,
-                                        Retriever<TextSegment> retriever,
-                                        List<String> metadataKeysToInclude) {
-        this.chatLanguageModel = ensureNotNull(chatLanguageModel, "chatLanguageModel");
-        this.chatMemory = chatMemory == null ? MessageWindowChatMemory.withMaxMessages(10) : chatMemory;
-        this.promptTemplate = promptTemplate == null ? DEFAULT_PROMPT_TEMPLATE : promptTemplate;
-        this.retriever = ensureNotNull(retriever, "retriever");
-        this.metadataKeysToInclude = metadataKeysToInclude;
+                                        Retriever<TextSegment> retriever) {
+        this(
+                chatLanguageModel,
+                chatMemory,
+                DefaultRetrievalAugmentor.builder()
+                        .contentRetriever(retriever.toContentRetriever())
+                        .contentInjector(DefaultContentInjector.builder()
+                                .promptTemplate(toPromptTemplateWithNewVariableNames(promptTemplate))
+                                .build())
+                        .build()
+        );
     }
 
     @Override
-    public String execute(String question) {
+    public String execute(String query) {
 
-        question = ensureNotBlank(question, "question");
-
-        List<TextSegment> relevantSegments = retriever.findRelevant(question);
-
-        Map<String, Object> variables = new HashMap<>();
-        variables.put("question", question);
-        variables.put("information", format(relevantSegments, metadataKeysToInclude));
-
-        UserMessage userMessage = promptTemplate.apply(variables).toUserMessage();
-
+        UserMessage userMessage = UserMessage.from(query);
+        userMessage = augment(userMessage);
         chatMemory.add(userMessage);
 
         AiMessage aiMessage = chatLanguageModel.generate(chatMemory.messages()).content();
 
         chatMemory.add(aiMessage);
-
         return aiMessage.text();
     }
 
-    private static String format(List<TextSegment> relevantSegments, List<String> metadata) {
-        return relevantSegments.stream()
-                .map(textSegment -> textSegmentToText(metadata, textSegment))
-                .map(segment -> "..." + segment + "...")
-                .collect(joining("\n\n"));
+    private UserMessage augment(UserMessage userMessage) {
+        Metadata metadata = Metadata.from(userMessage, chatMemory.id(), chatMemory.messages());
+
+        AugmentationRequest augmentationRequest = new AugmentationRequest(userMessage, metadata);
+
+        AugmentationResult augmentationResult = retrievalAugmentor.augment(augmentationRequest);
+
+        return (UserMessage) augmentationResult.chatMessage();
     }
 
-    private static String textSegmentToText(List<String> metadata, TextSegment textSegment) {
-        if (metadata == null) {
-            return textSegment.text();
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+
+        private ChatLanguageModel chatLanguageModel;
+        private ChatMemory chatMemory;
+        private RetrievalAugmentor retrievalAugmentor;
+
+        @Deprecated(forRemoval = true)
+        private dev.langchain4j.retriever.Retriever<TextSegment> retriever;
+        @Deprecated(forRemoval = true)
+        private PromptTemplate promptTemplate;
+
+        public Builder chatLanguageModel(ChatLanguageModel chatLanguageModel) {
+            this.chatLanguageModel = chatLanguageModel;
+            return this;
         }
 
-        StringBuilder formattedText = new StringBuilder();
+        public Builder chatMemory(ChatMemory chatMemory) {
+            this.chatMemory = chatMemory;
+            return this;
+        }
 
-        for (String metadataKey : metadata) {
-            String metadataContent = textSegment.metadata(metadataKey);
-            if (metadataContent != null) {
-                formattedText.append(metadataKey).append(": ").append(metadataContent).append("\n");
+        public Builder contentRetriever(ContentRetriever contentRetriever) {
+            if (contentRetriever != null) {
+                this.retrievalAugmentor = DefaultRetrievalAugmentor.builder()
+                        .contentRetriever(contentRetriever)
+                        .build();
             }
+            return this;
         }
 
-        if (!formattedText.toString().isEmpty()) {
-            formattedText.append("Content: ");
+        public Builder retrievalAugmentor(RetrievalAugmentor retrievalAugmentor) {
+            this.retrievalAugmentor = retrievalAugmentor;
+            return this;
         }
 
-        formattedText.append(textSegment.text());
+        /**
+         * @deprecated Use {@link Builder#contentRetriever(ContentRetriever)} instead.
+         */
+        @Deprecated(forRemoval = true)
+        public Builder retriever(dev.langchain4j.retriever.Retriever<TextSegment> retriever) {
+            this.retriever = retriever;
+            return this;
+        }
 
-        return formattedText.toString();
+        /**
+         * @deprecated Use this instead:<pre>
+         * .retrievalAugmentor(DefaultRetrievalAugmentor.builder()
+         *     .contentInjector(DefaultContentInjector.builder()
+         *         .promptTemplate(promptTemplate)
+         *         .build())
+         *     .build());
+         * </pre>
+         */
+        @Deprecated(forRemoval = true)
+        public Builder promptTemplate(PromptTemplate promptTemplate) {
+            this.promptTemplate = promptTemplate;
+            return this;
+        }
+
+        public ConversationalRetrievalChain build() {
+
+            if (retriever != null) {
+                retrievalAugmentor = DefaultRetrievalAugmentor.builder()
+                        .contentRetriever(retriever.toContentRetriever())
+                        .contentInjector(DefaultContentInjector.builder()
+                                .promptTemplate(toPromptTemplateWithNewVariableNames(promptTemplate))
+                                .build())
+                        .build();
+            }
+
+            return new ConversationalRetrievalChain(chatLanguageModel, chatMemory, retrievalAugmentor);
+        }
+    }
+
+    private static PromptTemplate toPromptTemplateWithNewVariableNames(PromptTemplate oldPromptTemplate) {
+        if (oldPromptTemplate != null) {
+            return PromptTemplate.from(oldPromptTemplate.template()
+                    .replaceAll("\\{\\{question}}", "{{userMessage}}")
+                    .replaceAll("\\{\\{information}}", "{{contents}}")
+            );
+        }
+
+        return PromptTemplate.from(
+                "Answer the following question to the best of your ability: {{userMessage}}\n" +
+                        "\n" +
+                        "Base your answer on the following information:\n" +
+                        "{{contents}}"
+        );
     }
 }

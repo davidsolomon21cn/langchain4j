@@ -1,20 +1,24 @@
 package dev.langchain4j.internal;
 
+import static dev.langchain4j.internal.ValidationUtils.ensureBetween;
+import static dev.langchain4j.internal.ValidationUtils.ensureEq;
+import static dev.langchain4j.internal.ValidationUtils.ensureGreaterThanZero;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.assertj.core.api.WithAssertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import static dev.langchain4j.internal.ValidationUtils.*;
-
 @SuppressWarnings("ConstantConditions")
 class ValidationUtilsTest implements WithAssertions {
     @Test
-    public void test_ensureEq() {
+    void ensure_eq() {
         ensureEq(1, 1, "test");
         ensureEq("abc", "abc", "test");
         ensureEq(null, null, "test");
@@ -32,7 +36,7 @@ class ValidationUtilsTest implements WithAssertions {
     }
 
     @Test
-    public void test_ensureNotNull() {
+    void ensure_not_null() {
         {
             Object obj = new Object();
             assertThat(ValidationUtils.ensureNotNull(obj, "test")).isSameAs(obj);
@@ -48,12 +52,11 @@ class ValidationUtilsTest implements WithAssertions {
     }
 
     @Test
-    public void test_ensureNotEmpty() {
+    void ensure_not_empty_collection() {
         {
             List<Object> list = new ArrayList<>();
             list.add(new Object());
-            assertThat(ValidationUtils.ensureNotEmpty(list, "test"))
-                    .isSameAs(list);
+            assertThat(ValidationUtils.ensureNotEmpty(list, "test")).isSameAs(list);
         }
 
         {
@@ -65,17 +68,60 @@ class ValidationUtilsTest implements WithAssertions {
 
         {
             assertThatExceptionOfType(IllegalArgumentException.class)
-                    .isThrownBy(() -> ValidationUtils.ensureNotEmpty(null, "test"))
+                    .isThrownBy(() -> ValidationUtils.ensureNotEmpty((Collection<?>) null, "test"))
                     .withMessageContaining("test cannot be null or empty");
         }
     }
 
     @Test
-    public void test_ensureNotBlank() {
+    void ensure_not_empty_array() {
+        {
+            Object[] array = {new Object()};
+            assertThat(ValidationUtils.ensureNotEmpty(array, "test")).isSameAs(array);
+        }
+
+        {
+            Object[] array = {};
+            assertThatExceptionOfType(IllegalArgumentException.class)
+                    .isThrownBy(() -> ValidationUtils.ensureNotEmpty(array, "test"))
+                    .withMessageContaining("test cannot be null or empty");
+        }
+
+        {
+            Object[] array = null;
+            assertThatExceptionOfType(IllegalArgumentException.class)
+                    .isThrownBy(() -> ValidationUtils.ensureNotEmpty(array, "test"))
+                    .withMessageContaining("test cannot be null or empty");
+        }
+    }
+
+    @Test
+    void ensure_not_empty_map() {
+        {
+            Map<Object, Object> map = new HashMap<>();
+            map.put(new Object(), new Object());
+            assertThat(ValidationUtils.ensureNotEmpty(map, "test")).isSameAs(map);
+        }
+
+        {
+            Map<Object, Object> map = new HashMap<>();
+            assertThatExceptionOfType(IllegalArgumentException.class)
+                    .isThrownBy(() -> ValidationUtils.ensureNotEmpty(map, "test"))
+                    .withMessageContaining("test cannot be null or empty");
+        }
+
+        {
+            assertThatExceptionOfType(IllegalArgumentException.class)
+                    .isThrownBy(() -> ValidationUtils.ensureNotEmpty((Map<?, ?>) null, "test"))
+                    .withMessageContaining("test cannot be null or empty");
+        }
+    }
+
+    @Test
+    void ensure_not_blank() {
         {
             String str = " abc  ";
-            assertThat(ValidationUtils.ensureNotBlank(str, "test"))
-                    .isSameAs(str);
+            assertThat(ValidationUtils.ensureNotBlank(str, "test")).isSameAs(str);
         }
 
         {
@@ -90,11 +136,10 @@ class ValidationUtilsTest implements WithAssertions {
                     .isThrownBy(() -> ValidationUtils.ensureNotBlank(null, "test"))
                     .withMessageContaining("test cannot be null or blank");
         }
-
     }
 
     @Test
-    public void test_ensureTrue() {
+    void ensure_true() {
         {
             ValidationUtils.ensureTrue(true, "test");
         }
@@ -137,7 +182,7 @@ class ValidationUtilsTest implements WithAssertions {
     }
 
     @Test
-    public void test_ensureBetween_int() {
+    void ensure_between_int() {
         {
             ValidationUtils.ensureBetween(1, 0, 1, "test");
         }
@@ -154,7 +199,7 @@ class ValidationUtilsTest implements WithAssertions {
     }
 
     @Test
-    public void test_ensureBetween_long() {
+    void ensure_between_long() {
         {
             ValidationUtils.ensureBetween(1L, 0, 1, "test");
         }

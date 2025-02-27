@@ -1,25 +1,28 @@
 package dev.langchain4j.model.localai;
 
-import dev.ai4j.openai4j.OpenAiClient;
-import dev.ai4j.openai4j.chat.ChatCompletionChoice;
-import dev.ai4j.openai4j.chat.ChatCompletionRequest;
-import dev.ai4j.openai4j.chat.ChatCompletionResponse;
-import dev.ai4j.openai4j.chat.Delta;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.localai.spi.LocalAiStreamingChatModelBuilderFactory;
 import dev.langchain4j.model.openai.OpenAiStreamingResponseBuilder;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.openai.internal.OpenAiClient;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionChoice;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionRequest;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionResponse;
+import dev.langchain4j.model.openai.internal.chat.Delta;
 import lombok.Builder;
 
 import java.time.Duration;
 import java.util.List;
 
 import static dev.langchain4j.internal.ValidationUtils.ensureNotBlank;
+import static dev.langchain4j.model.openai.InternalOpenAiHelper.convertResponse;
 import static dev.langchain4j.model.openai.InternalOpenAiHelper.toFunctions;
 import static dev.langchain4j.model.openai.InternalOpenAiHelper.toOpenAiMessages;
+import static dev.langchain4j.spi.ServiceHelper.loadFactories;
 import static java.time.Duration.ofSeconds;
 import static java.util.Collections.singletonList;
 
@@ -48,14 +51,11 @@ public class LocalAiStreamingChatModel implements StreamingChatLanguageModel {
         timeout = timeout == null ? ofSeconds(60) : timeout;
 
         this.client = OpenAiClient.builder()
-                .openAiApiKey("ignored")
                 .baseUrl(ensureNotBlank(baseUrl, "baseUrl"))
-                .callTimeout(timeout)
                 .connectTimeout(timeout)
                 .readTimeout(timeout)
-                .writeTimeout(timeout)
                 .logRequests(logRequests)
-                .logStreamingResponses(logResponses)
+                .logResponses(logResponses)
                 .build();
         this.modelName = ensureNotBlank(modelName, "modelName");
         this.temperature = temperature;
@@ -100,7 +100,7 @@ public class LocalAiStreamingChatModel implements StreamingChatLanguageModel {
 
         ChatCompletionRequest request = requestBuilder.build();
 
-        OpenAiStreamingResponseBuilder responseBuilder = new OpenAiStreamingResponseBuilder(null);
+        OpenAiStreamingResponseBuilder responseBuilder = new OpenAiStreamingResponseBuilder();
 
         client.chatCompletion(request)
                 .onPartialResponse(partialResponse -> {
@@ -108,8 +108,8 @@ public class LocalAiStreamingChatModel implements StreamingChatLanguageModel {
                     handle(partialResponse, handler);
                 })
                 .onComplete(() -> {
-                    Response<AiMessage> response = responseBuilder.build(null, false);
-                    handler.onComplete(response);
+                    ChatResponse chatResponse = responseBuilder.build();
+                    handler.onComplete(convertResponse(chatResponse));
                 })
                 .onError(handler::onError)
                 .execute();
@@ -125,6 +125,20 @@ public class LocalAiStreamingChatModel implements StreamingChatLanguageModel {
         String content = delta.content();
         if (content != null) {
             handler.onNext(content);
+        }
+    }
+
+    public static LocalAiStreamingChatModelBuilder builder() {
+        for (LocalAiStreamingChatModelBuilderFactory factory : loadFactories(LocalAiStreamingChatModelBuilderFactory.class)) {
+            return factory.get();
+        }
+        return new LocalAiStreamingChatModelBuilder();
+    }
+
+    public static class LocalAiStreamingChatModelBuilder {
+        public LocalAiStreamingChatModelBuilder() {
+            // This is public so it can be extended
+            // By default with Lombok it becomes package private
         }
     }
 }

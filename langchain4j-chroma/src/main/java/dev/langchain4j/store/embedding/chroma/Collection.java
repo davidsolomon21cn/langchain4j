@@ -6,17 +6,17 @@ class Collection {
 
     private String id;
     private String name;
-    private Map<String, String> metadata;
+    private Map<String, Object> metadata;
 
-    public String id() {
+    public String getId() {
         return id;
     }
 
-    public String name() {
+    public String getName() {
         return name;
     }
 
-    public Map<String, String> metadata() {
+    public Map<String, Object> getMetadata() {
         return metadata;
     }
 }
