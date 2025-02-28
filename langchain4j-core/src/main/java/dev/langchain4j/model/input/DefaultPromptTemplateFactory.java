@@ -20,7 +20,8 @@ class DefaultPromptTemplateFactory implements PromptTemplateFactory {
 
     static class DefaultTemplate implements Template {
 
-        private static final Pattern VARIABLE_PATTERN = Pattern.compile("\\{\\{(.+?)}}");
+        @SuppressWarnings("RegExpRedundantEscape")
+        private static final Pattern VARIABLE_PATTERN = Pattern.compile("\\{\\{(.+?)\\}\\}");
 
         private final String template;
         private final Set<String> allVariables;
@@ -62,11 +63,11 @@ class DefaultPromptTemplateFactory implements PromptTemplateFactory {
             if (value == null || value.toString() == null) {
                 throw illegalArgument("Value for the variable '%s' is null", variable);
             }
-            return template.replaceAll(inDoubleCurlyBrackets(variable), value.toString());
+            return template.replace(inDoubleCurlyBrackets(variable), value.toString());
         }
 
         private static String inDoubleCurlyBrackets(String variable) {
-            return "\\{\\{" + variable + "\\}\\}";
+            return "{{" + variable + "}}";
         }
     }
 }

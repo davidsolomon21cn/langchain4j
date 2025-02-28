@@ -1,11 +1,18 @@
 package dev.langchain4j.model.bedrock.internal;
 
+import static dev.langchain4j.internal.RetryUtils.withRetry;
+
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.internal.Json;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.output.TokenUsage;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.experimental.SuperBuilder;
@@ -17,15 +24,6 @@ import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
 
-import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-
-import static dev.langchain4j.internal.RetryUtils.withRetry;
-
 /**
  * Abstract bedrock embedding model
  */
@@ -33,12 +31,12 @@ import static dev.langchain4j.internal.RetryUtils.withRetry;
 @Getter
 public abstract class AbstractBedrockEmbeddingModel<T extends BedrockEmbeddingResponse> implements EmbeddingModel {
 
+    private volatile BedrockRuntimeClient client;
+
     @Builder.Default
     private final Region region = Region.US_EAST_1;
     @Builder.Default
     private final AwsCredentialsProvider credentialsProvider = DefaultCredentialsProvider.builder().build();
-    @Getter(lazy = true)
-    private final BedrockRuntimeClient client = initClient();
     @Builder.Default
     private final Integer maxRetries = 5;
 
@@ -58,7 +56,7 @@ public abstract class AbstractBedrockEmbeddingModel<T extends BedrockEmbeddingRe
             embeddings.add(response.toEmbedding());
             totalInputToken += response.getInputTextTokenCount();
         }
-        
+
         return Response.from(
                 embeddings,
                 new TokenUsage(totalInputToken));
@@ -71,6 +69,17 @@ public abstract class AbstractBedrockEmbeddingModel<T extends BedrockEmbeddingRe
      * @return request body
      */
     protected abstract List<Map<String, Object>> getRequestParameters(final List<TextSegment> textSegments);
+
+    public BedrockRuntimeClient getClient() {
+        if (client == null) {
+            synchronized (this) {
+                if (client == null) {
+                    client = initClient();
+                }
+            }
+        }
+        return client;
+    }
 
     /**
      * Get model id
@@ -93,7 +102,7 @@ public abstract class AbstractBedrockEmbeddingModel<T extends BedrockEmbeddingRe
      * @return invoke model response
      */
     protected InvokeModelResponse invoke(final String body) {
-        // Invoke model
+
         InvokeModelRequest invokeModelRequest = InvokeModelRequest
                 .builder()
                 .modelId(getModelId())
