@@ -1,12 +1,13 @@
 package dev.langchain4j.model.openai;
 
-import dev.ai4j.openai4j.chat.ChatCompletionModel;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.Tokenizer;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -14,15 +15,29 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opentest4j.AssertionFailedError;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
-import static dev.ai4j.openai4j.chat.ChatCompletionModel.*;
-import static dev.langchain4j.agent.tool.JsonSchemaProperty.*;
+import static dev.langchain4j.agent.tool.JsonSchemaProperty.ARRAY;
+import static dev.langchain4j.agent.tool.JsonSchemaProperty.INTEGER;
+import static dev.langchain4j.agent.tool.JsonSchemaProperty.STRING;
+import static dev.langchain4j.agent.tool.JsonSchemaProperty.description;
+import static dev.langchain4j.agent.tool.JsonSchemaProperty.enums;
+import static dev.langchain4j.agent.tool.JsonSchemaProperty.items;
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static dev.langchain4j.data.message.SystemMessage.systemMessage;
 import static dev.langchain4j.data.message.ToolExecutionResultMessage.toolExecutionResultMessage;
 import static dev.langchain4j.data.message.UserMessage.userMessage;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_3_5_TURBO;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_3_5_TURBO_0125;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_3_5_TURBO_1106;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_4_0125_PREVIEW;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_4_1106_PREVIEW;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_4_32K;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_4_32K_0613;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_4_TURBO_PREVIEW;
 import static java.util.Arrays.asList;
 import static java.util.Arrays.stream;
 import static java.util.Collections.singletonList;
@@ -34,20 +49,37 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 @Disabled("this test is very long and expensive, we will need to set a schedule for it to run maybe 1 time per month")
 class OpenAiTokenizerIT {
 
+    // my API key does not have access to these models
+    private static final Set<OpenAiChatModelName> MODELS_WITHOUT_ACCESS = new HashSet<>(asList(
+            GPT_3_5_TURBO_0125,
+            GPT_4_32K,
+            GPT_4_32K_0613
+    ));
+
+    private static final Set<OpenAiChatModelName> MODELS_WITH_PARALLEL_TOOL_SUPPORT = new HashSet<>(asList(
+            // TODO add GPT_3_5_TURBO once it points to GPT_3_5_TURBO_1106
+            GPT_3_5_TURBO_1106,
+            GPT_3_5_TURBO_0125,
+            GPT_4_TURBO_PREVIEW,
+            GPT_4_1106_PREVIEW,
+            GPT_4_0125_PREVIEW
+    ));
+
     @ParameterizedTest
     @MethodSource
-    void should_count_tokens_in_messages(List<ChatMessage> messages, ChatCompletionModel modelName) {
+    void should_count_tokens_in_messages(List<ChatMessage> messages, OpenAiChatModelName modelName) {
 
         // given
         OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(System.getenv("OPENAI_BASE_URL"))
                 .apiKey(System.getenv("OPENAI_API_KEY"))
-                .modelName(modelName.toString())
-                .maxTokens(1) // we don't need outputs, let's not waste tokens
+                .modelName(modelName)
+                .maxCompletionTokens(1) // we don't need outputs, let's not waste tokens
                 .logRequests(true)
                 .logResponses(true)
                 .build();
 
-        int expectedTokenCount = model.generate(messages).tokenUsage().inputTokenCount();
+        int expectedTokenCount = model.chat(messages).tokenUsage().inputTokenCount();
 
         Tokenizer tokenizer = new OpenAiTokenizer(modelName.toString());
 
@@ -59,9 +91,8 @@ class OpenAiTokenizerIT {
     }
 
     static Stream<Arguments> should_count_tokens_in_messages() {
-        return stream(ChatCompletionModel.values())
-                // I don't have access to these models
-                .filter(model -> model != GPT_4_32K && model != GPT_4_32K_0314 && model != GPT_4_32K_0613)
+        return stream(OpenAiChatModelName.values())
+                .filter(model -> !MODELS_WITHOUT_ACCESS.contains(model))
                 .flatMap(model -> Stream.of(
                         arguments(singletonList(systemMessage("Be friendly.")), model),
                         arguments(singletonList(systemMessage("You are a helpful assistant, help the user!")), model),
@@ -101,18 +132,19 @@ class OpenAiTokenizerIT {
 
     @ParameterizedTest
     @MethodSource
-    void should_count_tokens_in_messages_with_single_tool(List<ChatMessage> messages, ChatCompletionModel modelName) {
+    void should_count_tokens_in_messages_with_single_tool(List<ChatMessage> messages, OpenAiChatModelName modelName) {
 
         // given
         OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(System.getenv("OPENAI_BASE_URL"))
                 .apiKey(System.getenv("OPENAI_API_KEY"))
-                .modelName(modelName.toString())
-                .maxTokens(1) // we don't need outputs, let's not waste tokens
+                .modelName(modelName)
+                .maxCompletionTokens(1) // we don't need outputs, let's not waste tokens
                 .logRequests(true)
                 .logResponses(true)
                 .build();
 
-        int expectedTokenCount = model.generate(messages).tokenUsage().inputTokenCount();
+        int expectedTokenCount = model.chat(messages).tokenUsage().inputTokenCount();
 
         Tokenizer tokenizer = new OpenAiTokenizer(modelName.toString());
 
@@ -124,12 +156,8 @@ class OpenAiTokenizerIT {
     }
 
     static Stream<Arguments> should_count_tokens_in_messages_with_single_tool() {
-        return stream(ChatCompletionModel.values())
-                // I don't have access to these models
-                .filter(model -> model != GPT_4_32K && model != GPT_4_32K_0314 && model != GPT_4_32K_0613
-                        && model != GPT_4_0314 // does not support tools
-                        && model != GPT_4_VISION_PREVIEW // does not support tools (yet)
-                )
+        return stream(OpenAiChatModelName.values())
+                .filter(model -> !MODELS_WITHOUT_ACCESS.contains(model))
                 .flatMap(model -> Stream.of(
 
                         // various tool "name" lengths
@@ -321,17 +349,18 @@ class OpenAiTokenizerIT {
     @ParameterizedTest
     @MethodSource
     void should_count_tokens_in_messages_with_multiple_tools(List<ChatMessage> messages,
-                                                             ChatCompletionModel modelName) {
+                                                             OpenAiChatModelName modelName) {
         // given
         OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(System.getenv("OPENAI_BASE_URL"))
                 .apiKey(System.getenv("OPENAI_API_KEY"))
-                .modelName(modelName.toString())
-                .maxTokens(1) // we don't need outputs, let's not waste tokens
+                .modelName(modelName)
+                .maxCompletionTokens(1) // we don't need outputs, let's not waste tokens
                 .logRequests(true)
                 .logResponses(true)
                 .build();
 
-        int expectedTokenCount = model.generate(messages).tokenUsage().inputTokenCount();
+        int expectedTokenCount = model.chat(messages).tokenUsage().inputTokenCount();
 
         Tokenizer tokenizer = new OpenAiTokenizer(modelName.toString());
 
@@ -343,9 +372,9 @@ class OpenAiTokenizerIT {
     }
 
     static Stream<Arguments> should_count_tokens_in_messages_with_multiple_tools() {
-        return stream(ChatCompletionModel.values())
-                // only these models support parallel tool calling
-                .filter(model -> model == GPT_3_5_TURBO_1106 || model == GPT_4_1106_PREVIEW)
+        return stream(OpenAiChatModelName.values())
+                .filter(model -> !MODELS_WITHOUT_ACCESS.contains(model))
+                .filter(MODELS_WITH_PARALLEL_TOOL_SUPPORT::contains)
                 .flatMap(model -> Stream.of(
 
                         // various tool "name" lengths
@@ -747,12 +776,13 @@ class OpenAiTokenizerIT {
     @ParameterizedTest
     @MethodSource
     void should_count_tokens_in_tool_specifications(List<ToolSpecification> toolSpecifications,
-                                                    ChatCompletionModel modelName) {
+                                                    OpenAiChatModelName modelName) {
         // given
         OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(System.getenv("OPENAI_BASE_URL"))
                 .apiKey(System.getenv("OPENAI_API_KEY"))
-                .modelName(modelName.toString())
-                .maxTokens(2) // we don't need outputs, let's not waste tokens
+                .modelName(modelName)
+                .maxCompletionTokens(2) // we don't need outputs, let's not waste tokens
                 .logRequests(true)
                 .logResponses(true)
                 .build();
@@ -761,7 +791,7 @@ class OpenAiTokenizerIT {
 
         Tokenizer tokenizer = new OpenAiTokenizer(modelName.toString());
 
-        int expectedTokenCount = model.generate(dummyMessages, toolSpecifications).tokenUsage().inputTokenCount()
+        int expectedTokenCount = model.chat(toRequest(dummyMessages, toolSpecifications)).tokenUsage().inputTokenCount()
                 - tokenizer.estimateTokenCountInMessages(dummyMessages);
 
         // when
@@ -772,11 +802,8 @@ class OpenAiTokenizerIT {
     }
 
     static Stream<Arguments> should_count_tokens_in_tool_specifications() {
-        return stream(ChatCompletionModel.values())
-                // I don't have access to these models
-                .filter(model -> model != GPT_4_32K && model != GPT_4_32K_0314 && model != GPT_4_32K_0613
-                        && model != GPT_4_0314 // does not support tools
-                        && model != GPT_4_VISION_PREVIEW) // does not support tools (yet)
+        return stream(OpenAiChatModelName.values())
+                .filter(model -> !MODELS_WITHOUT_ACCESS.contains(model))
                 .flatMap(model -> Stream.of(
 
                         // "name" of various lengths
@@ -1029,18 +1056,19 @@ class OpenAiTokenizerIT {
     void should_count_tokens_in_tool_execution_request(UserMessage userMessage,
                                                        ToolSpecification toolSpecification,
                                                        ToolExecutionRequest expectedToolExecutionRequest,
-                                                       ChatCompletionModel modelName) {
+                                                       OpenAiChatModelName modelName) {
         // given
         OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(System.getenv("OPENAI_BASE_URL"))
                 .apiKey(System.getenv("OPENAI_API_KEY"))
-                .modelName(modelName.toString())
+                .modelName(modelName)
                 .logRequests(true)
                 .logResponses(true)
                 .build();
 
-        Response<AiMessage> response = model.generate(singletonList(userMessage), singletonList(toolSpecification));
+        ChatResponse response = model.chat(toRequest(List.of(userMessage), List.of(toolSpecification)));
 
-        List<ToolExecutionRequest> toolExecutionRequests = response.content().toolExecutionRequests();
+        List<ToolExecutionRequest> toolExecutionRequests = response.aiMessage().toolExecutionRequests();
         // we need to ensure that model generated expected tool execution request,
         // then we can use output token count as a reference
         assertThat(toolExecutionRequests).hasSize(1);
@@ -1065,7 +1093,7 @@ class OpenAiTokenizerIT {
                 // TODO remove once they fix it
                 e.printStackTrace();
                 // there is some pattern to it, so we are going to check if this is really the case or our calculation is wrong
-                Tokenizer tokenizer2 = new OpenAiTokenizer(GPT_3_5_TURBO.toString());
+                Tokenizer tokenizer2 = new OpenAiTokenizer(GPT_3_5_TURBO);
                 int tokenCount2 = tokenizer2.estimateTokenCountInToolExecutionRequests(toolExecutionRequests);
                 assertThat(tokenCount2).isEqualTo(expectedTokenCount - 3);
             } else {
@@ -1079,16 +1107,17 @@ class OpenAiTokenizerIT {
     void should_count_tokens_in_forceful_tool_specification_and_execution_request(UserMessage userMessage,
                                                                                   ToolSpecification toolSpecification,
                                                                                   ToolExecutionRequest expectedToolExecutionRequest,
-                                                                                  ChatCompletionModel modelName) {
+                                                                                  OpenAiChatModelName modelName) {
         // given
         OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(System.getenv("OPENAI_BASE_URL"))
                 .apiKey(System.getenv("OPENAI_API_KEY"))
-                .modelName(modelName.toString())
+                .modelName(modelName)
                 .logRequests(true)
                 .logResponses(true)
                 .build();
 
-        Response<AiMessage> response = model.generate(singletonList(userMessage), toolSpecification);
+        ChatResponse response = model.chat(toRequest(List.of(userMessage), List.of(toolSpecification)));
 
         Tokenizer tokenizer = new OpenAiTokenizer(modelName.toString());
 
@@ -1102,7 +1131,7 @@ class OpenAiTokenizerIT {
         assertThat(tokenCountInSpecification).isEqualTo(expectedTokenCountInSpecification);
 
         // given
-        List<ToolExecutionRequest> toolExecutionRequests = response.content().toolExecutionRequests();
+        List<ToolExecutionRequest> toolExecutionRequests = response.aiMessage().toolExecutionRequests();
         // we need to ensure that model generated expected tool execution request,
         // then we can use output token count as a reference
         assertThat(toolExecutionRequests).hasSize(1);
@@ -1120,11 +1149,8 @@ class OpenAiTokenizerIT {
     }
 
     static Stream<Arguments> should_count_tokens_in_tool_execution_request() {
-        return stream(ChatCompletionModel.values())
-                // I don't have access to these models
-                .filter(model -> model != GPT_4_32K && model != GPT_4_32K_0314 && model != GPT_4_32K_0613
-                        && model != GPT_4_0314 // does not support tools
-                        && model != GPT_4_VISION_PREVIEW) // does not support tools (yet)
+        return stream(OpenAiChatModelName.values())
+                .filter(model -> !MODELS_WITHOUT_ACCESS.contains(model))
                 .flatMap(model -> Stream.of(
 
                         // no arguments, different lengths of "name"
@@ -1304,18 +1330,19 @@ class OpenAiTokenizerIT {
     void should_count_tokens_in_multiple_tool_execution_requests(UserMessage userMessage,
                                                                  List<ToolSpecification> toolSpecifications,
                                                                  List<ToolExecutionRequest> expectedToolExecutionRequests,
-                                                                 ChatCompletionModel modelName) {
+                                                                 OpenAiChatModelName modelName) {
         // given
         OpenAiChatModel model = OpenAiChatModel.builder()
+                .baseUrl(System.getenv("OPENAI_BASE_URL"))
                 .apiKey(System.getenv("OPENAI_API_KEY"))
-                .modelName(modelName.toString())
+                .modelName(modelName)
                 .logRequests(true)
                 .logResponses(true)
                 .build();
 
-        Response<AiMessage> response = model.generate(singletonList(userMessage), toolSpecifications);
+        ChatResponse response = model.chat(toRequest(List.of(userMessage), toolSpecifications));
 
-        List<ToolExecutionRequest> toolExecutionRequests = response.content().toolExecutionRequests();
+        List<ToolExecutionRequest> toolExecutionRequests = response.aiMessage().toolExecutionRequests();
         // we need to ensure that model generated expected tool execution requests,
         // then we can use output token count as a reference
         assertThat(toolExecutionRequests).hasSize(expectedToolExecutionRequests.size());
@@ -1338,9 +1365,9 @@ class OpenAiTokenizerIT {
     }
 
     static Stream<Arguments> should_count_tokens_in_multiple_tool_execution_requests() {
-        return stream(ChatCompletionModel.values())
-                // only these models support parallel tool calling
-                .filter(model -> model == GPT_3_5_TURBO_1106 || model == GPT_4_1106_PREVIEW)
+        return stream(OpenAiChatModelName.values())
+                .filter(model -> !MODELS_WITHOUT_ACCESS.contains(model))
+                .filter(MODELS_WITH_PARALLEL_TOOL_SUPPORT::contains)
                 .flatMap(model -> Stream.of(
 
                         // no arguments, different lengths of "name"
@@ -1738,4 +1765,11 @@ class OpenAiTokenizerIT {
                         )
                 ));
     }
+    
+    private static ChatRequest toRequest(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
+        return ChatRequest.builder()
+                .messages(messages)
+                .toolSpecifications(toolSpecifications)
+                .build();
+    } 
 }

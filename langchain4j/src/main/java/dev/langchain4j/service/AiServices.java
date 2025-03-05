@@ -1,7 +1,13 @@
 package dev.langchain4j.service;
 
+import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
+import static dev.langchain4j.service.IllegalConfigurationException.illegalConfiguration;
+import static dev.langchain4j.spi.ServiceHelper.loadFactories;
+import static java.util.Arrays.asList;
+import static java.util.stream.Collectors.toList;
+
 import dev.langchain4j.agent.tool.Tool;
-import dev.langchain4j.agent.tool.DefaultToolExecutor;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -14,33 +20,51 @@ import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.input.structured.StructuredPrompt;
 import dev.langchain4j.model.moderation.Moderation;
 import dev.langchain4j.model.moderation.ModerationModel;
+import dev.langchain4j.model.output.TokenUsage;
+import dev.langchain4j.rag.DefaultRetrievalAugmentor;
+import dev.langchain4j.rag.RetrievalAugmentor;
+import dev.langchain4j.rag.content.Content;
+import dev.langchain4j.rag.content.retriever.ContentRetriever;
+import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.retriever.Retriever;
-import dev.langchain4j.spi.ServiceHelper;
+import dev.langchain4j.service.tool.ToolExecutor;
+import dev.langchain4j.service.tool.ToolProvider;
 import dev.langchain4j.spi.services.AiServicesFactory;
-
-import java.lang.reflect.*;
-import java.util.*;
-import java.util.concurrent.*;
-
-import static dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationFrom;
-import static dev.langchain4j.exception.IllegalConfigurationException.illegalConfiguration;
-import static java.util.stream.Collectors.toList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.function.Function;
 
 /**
- * AI Services provide a simpler and more flexible alternative to chains.
+ * AI Services is a high-level API of LangChain4j to interact with {@link ChatLanguageModel} and {@link StreamingChatLanguageModel}.
+ * <p>
  * You can define your own API (a Java interface with one or more methods),
- * and AiServices will provide an implementation for it (we call this "AI Service").
+ * and {@code AiServices} will provide an implementation for it, hiding all the complexity from you.
+ * <p>
+ * You can find more details <a href="https://docs.langchain4j.dev/tutorials/ai-services">here</a>.
+ * <p>
+ * Please note that AI Service should not be called concurrently for the same @{@link MemoryId},
+ * as it can lead to corrupted {@link ChatMemory}. Currently, AI Service does not implement any mechanism
+ * to prevent concurrent calls for the same @{@link MemoryId}.
  * <p>
  * Currently, AI Services support:
  * <pre>
- * - Prompt templates for user and system messages using {@link UserMessage} and {@link SystemMessage}
- * - Structured prompts as method arguments (see {@link StructuredPrompt})
- * - Shared or per-user (see {@link MemoryId}) chat memory
- * - Retrievers
- * - Tools (see {@link Tool})
- * - Various return types (output parsers), see below
+ * - Static system message templates, configured via @{@link SystemMessage} annotation on top of the method
+ * - Dynamic system message templates, configured via {@link #systemMessageProvider(Function)}
+ * - Static user message templates, configured via @{@link UserMessage} annotation on top of the method
+ * - Dynamic user message templates, configured via method parameter annotated with @{@link UserMessage}
+ * - Single (shared) {@link ChatMemory}, configured via {@link #chatMemory(ChatMemory)}
+ * - Separate (per-user) {@code ChatMemory}, configured via {@link #chatMemoryProvider(ChatMemoryProvider)} and a method parameter annotated with @{@link MemoryId}
+ * - RAG, configured via {@link #contentRetriever(ContentRetriever)} or {@link #retrievalAugmentor(RetrievalAugmentor)}
+ * - Tools, configured via {@link #tools(Collection)}, {@link #tools(Object...)}, {@link #tools(Map)} or {@link #toolProvider(ToolProvider)} and methods annotated with @{@link Tool}
+ * - Various method return types (output parsers), see more details below
  * - Streaming (use {@link TokenStream} as a return type)
- * - Auto-moderation using {@link Moderate}
+ * - Structured prompts as method arguments (see @{@link StructuredPrompt})
+ * - Auto-moderation, configured via @{@link Moderate} annotation
  * </pre>
  * <p>
  * Here is the simplest example of an AI Service:
@@ -59,12 +83,15 @@ import static java.util.stream.Collectors.toList;
  *
  * <pre>
  * The return type of methods in your AI Service can be any of the following:
- * - a {@code String} or an {@link AiMessage}, if you want to get the answer from the LLM as-is
+ * - a {@link String} or an {@link AiMessage}, if you want to get the answer from the LLM as-is
  * - a {@code List<String>} or {@code Set<String>}, if you want to receive the answer as a collection of items or bullet points
- * - any {@code Enum} or a {@code boolean}, if you want to use the LLM for classification
+ * - any {@link Enum} or a {@code boolean}, if you want to use the LLM for classification
  * - a primitive or boxed Java type: {@code int}, {@code Double}, etc., if you want to use the LLM for data extraction
  * - many default Java types: {@code Date}, {@code LocalDateTime}, {@code BigDecimal}, etc., if you want to use the LLM for data extraction
- * - any custom POJO, if you want to use the LLM for data extraction
+ * - any custom POJO, if you want to use the LLM for data extraction.
+ * - Result&lt;T&gt; if you want to access {@link TokenUsage} or sources ({@link Content}s retrieved during RAG), aside from T, which can be of any type listed above. For example: Result&lt;String&gt;, Result&lt;MyCustomPojo&gt;
+ * For POJOs, it is advisable to use the "json mode" feature if the LLM provider supports it. For OpenAI, this can be enabled by calling {@code responseFormat("json_object")} during model construction.
+ *
  * </pre>
  * <p>
  * Let's see how we can classify the sentiment of a text:
@@ -85,7 +112,7 @@ import static java.util.stream.Collectors.toList;
  * System.out.println(sentiment); // POSITIVE
  * </pre>
  * <p>
- * As demonstrated, you can put {@link UserMessage} and {@link SystemMessage} annotations above a method to define
+ * As demonstrated, you can put @{@link UserMessage} and @{@link SystemMessage} annotations above a method to define
  * templates for user and system messages, respectively.
  * In this example, the special {@code {{it}}} prompt template variable is used because there's only one method parameter.
  * However, you can use more parameters as demonstrated in the following example:
@@ -108,6 +135,10 @@ public abstract class AiServices<T> {
 
     protected final AiServiceContext context;
 
+    private boolean retrieverSet = false;
+    private boolean contentRetrieverSet = false;
+    private boolean retrievalAugmentorSet = false;
+
     protected AiServices(AiServiceContext context) {
         this.context = context;
     }
@@ -122,9 +153,7 @@ public abstract class AiServices<T> {
      * @return An instance of the provided interface, implementing all its defined methods.
      */
     public static <T> T create(Class<T> aiService, ChatLanguageModel chatLanguageModel) {
-        return builder(aiService)
-                .chatLanguageModel(chatLanguageModel)
-                .build();
+        return builder(aiService).chatLanguageModel(chatLanguageModel).build();
     }
 
     /**
@@ -151,10 +180,10 @@ public abstract class AiServices<T> {
      */
     public static <T> AiServices<T> builder(Class<T> aiService) {
         AiServiceContext context = new AiServiceContext(aiService);
-        return ServiceHelper.loadFactoryService(
-                AiServicesFactory.class,
-                f -> f.create(context),
-                () -> new DefaultAiServices<>(context));
+        for (AiServicesFactory factory : loadFactories(AiServicesFactory.class)) {
+            return factory.create(context);
+        }
+        return new DefaultAiServices<>(context);
     }
 
     /**
@@ -183,6 +212,27 @@ public abstract class AiServices<T> {
      */
     public AiServices<T> streamingChatLanguageModel(StreamingChatLanguageModel streamingChatLanguageModel) {
         context.streamingChatModel = streamingChatLanguageModel;
+        return this;
+    }
+
+    /**
+     * Configures the system message provider, which provides a system message to be used each time an AI service is invoked.
+     * <br>
+     * When both {@code @SystemMessage} and the system message provider are configured,
+     * {@code @SystemMessage} takes precedence.
+     *
+     * @param systemMessageProvider A {@link Function} that accepts a chat memory ID
+     *                              (a value of a method parameter annotated with @{@link MemoryId})
+     *                              and returns a system message to be used.
+     *                              If there is no parameter annotated with {@code @MemoryId},
+     *                              the value of memory ID is "default".
+     *                              The returned {@link String} can be either a complete system message
+     *                              or a system message template containing unresolved template variables (e.g. "{{name}}"),
+     *                              which will be resolved using the values of method parameters annotated with @{@link V}.
+     * @return builder
+     */
+    public AiServices<T> systemMessageProvider(Function<Object, String> systemMessageProvider) {
+        context.systemMessageProvider = systemMessageProvider.andThen(Optional::ofNullable);
         return this;
     }
 
@@ -249,7 +299,6 @@ public abstract class AiServices<T> {
 
     /**
      * Configures the tools that the LLM can use.
-     * A {@link ChatMemory} that can hold at least 3 messages is required for the tools to work properly.
      *
      * @param objectsWithTools One or more objects whose methods are annotated with {@link Tool}.
      *                         All these tools (methods annotated with {@link Tool}) will be accessible to the LLM.
@@ -258,12 +307,11 @@ public abstract class AiServices<T> {
      * @see Tool
      */
     public AiServices<T> tools(Object... objectsWithTools) {
-        return tools(Arrays.asList(objectsWithTools));
+        return tools(asList(objectsWithTools));
     }
 
     /**
      * Configures the tools that the LLM can use.
-     * A {@link ChatMemory} that can hold at least 3 messages is required for the tools to work properly.
      *
      * @param objectsWithTools A list of objects whose methods are annotated with {@link Tool}.
      *                         All these tools (methods annotated with {@link Tool}) are accessible to the LLM.
@@ -271,37 +319,108 @@ public abstract class AiServices<T> {
      * @return builder
      * @see Tool
      */
-    public AiServices<T> tools(List<Object> objectsWithTools) {
-        context.toolSpecifications = new ArrayList<>();
-        context.toolExecutors = new HashMap<>();
-
-        for (Object objectWithTool : objectsWithTools) {
-            for (Method method : objectWithTool.getClass().getDeclaredMethods()) {
-                if (method.isAnnotationPresent(Tool.class)) {
-                    ToolSpecification toolSpecification = toolSpecificationFrom(method);
-                    context.toolSpecifications.add(toolSpecification);
-                    context.toolExecutors.put(toolSpecification.name(), new DefaultToolExecutor(objectWithTool, method));
-                }
-            }
-        }
-
+    public AiServices<T> tools(Collection<Object> objectsWithTools) {
+        context.toolService.tools(objectsWithTools);
         return this;
     }
 
-    // TODO separate retriever per user
-    // TODO way to configure custom prompt with original message and context
-    // TODO callback to transform/filter retrieved segments
+    /**
+     * Configures the tool provider that the LLM can use
+     *
+     * @param toolProvider Decides which tools the LLM could use to handle the request
+     * @return builder
+     */
+    public AiServices<T> toolProvider(ToolProvider toolProvider) {
+        context.toolService.toolProvider(toolProvider);
+        return this;
+    }
 
     /**
+     * Configures the tools that the LLM can use.
+     *
+     * @param tools A map of {@link ToolSpecification} to {@link ToolExecutor} entries.
+     *              This method of configuring tools is useful when tools must be configured programmatically.
+     *              Otherwise, it is recommended to use the {@link Tool}-annotated java methods
+     *              and configure tools with the {@link #tools(Object...)} and {@link #tools(Collection)} methods.
+     * @return builder
+     */
+    public AiServices<T> tools(Map<ToolSpecification, ToolExecutor> tools) {
+        context.toolService.tools(tools);
+        return this;
+    }
+
+    /**
+     * Configures the strategy to be used when the LLM hallucinates a tool name (i.e., attempts to call a nonexistent tool).
+     *
+     * @param hallucinatedToolNameStrategy A Function from {@link ToolExecutionRequest} to {@link ToolExecutionResultMessage} defining
+     *                                  the response provided to the LLM when it hallucinates a tool name.
+     * @return builder
+     */
+    public AiServices<T> hallucinatedToolNameStrategy(
+            Function<ToolExecutionRequest, ToolExecutionResultMessage> hallucinatedToolNameStrategy) {
+        context.toolService.hallucinatedToolNameStrategy(hallucinatedToolNameStrategy);
+        return this;
+    }
+
+    /**
+     * @param retriever The retriever to be used by the AI Service.
+     * @return builder
+     * @deprecated Use {@link #contentRetriever(ContentRetriever)}
+     * (e.g. {@link EmbeddingStoreContentRetriever}) instead.
+     * <br>
      * Configures a retriever that will be invoked on every method call to fetch relevant information
      * related to the current user message from an underlying source (e.g., embedding store).
      * This relevant information is automatically injected into the message sent to the LLM.
+     */
+    @Deprecated(forRemoval = true)
+    public AiServices<T> retriever(Retriever<TextSegment> retriever) {
+        if (contentRetrieverSet || retrievalAugmentorSet) {
+            throw illegalConfiguration("Only one out of [retriever, contentRetriever, retrievalAugmentor] can be set");
+        }
+        if (retriever != null) {
+            AiServices<T> withContentRetriever = contentRetriever(retriever.toContentRetriever());
+            retrieverSet = true;
+            return withContentRetriever;
+        }
+        return this;
+    }
+
+    /**
+     * Configures a content retriever to be invoked on every method call for retrieving relevant content
+     * related to the user's message from an underlying data source
+     * (e.g., an embedding store in the case of an {@link EmbeddingStoreContentRetriever}).
+     * The retrieved relevant content is then automatically incorporated into the message sent to the LLM.
+     * <br>
+     * This method provides a straightforward approach for those who do not require
+     * a customized {@link RetrievalAugmentor}.
+     * It configures a {@link DefaultRetrievalAugmentor} with the provided {@link ContentRetriever}.
      *
-     * @param retriever The retriever to be used by the AI Service.
+     * @param contentRetriever The content retriever to be used by the AI Service.
      * @return builder
      */
-    public AiServices<T> retriever(Retriever<TextSegment> retriever) {
-        context.retriever = retriever;
+    public AiServices<T> contentRetriever(ContentRetriever contentRetriever) {
+        if (retrieverSet || retrievalAugmentorSet) {
+            throw illegalConfiguration("Only one out of [retriever, contentRetriever, retrievalAugmentor] can be set");
+        }
+        contentRetrieverSet = true;
+        context.retrievalAugmentor = DefaultRetrievalAugmentor.builder()
+                .contentRetriever(ensureNotNull(contentRetriever, "contentRetriever"))
+                .build();
+        return this;
+    }
+
+    /**
+     * Configures a retrieval augmentor to be invoked on every method call.
+     *
+     * @param retrievalAugmentor The retrieval augmentor to be used by the AI Service.
+     * @return builder
+     */
+    public AiServices<T> retrievalAugmentor(RetrievalAugmentor retrievalAugmentor) {
+        if (retrieverSet || contentRetrieverSet) {
+            throw illegalConfiguration("Only one out of [retriever, contentRetriever, retrievalAugmentor] can be set");
+        }
+        retrievalAugmentorSet = true;
+        context.retrievalAugmentor = ensureNotNull(retrievalAugmentor, "retrievalAugmentor");
         return this;
     }
 
@@ -315,16 +434,6 @@ public abstract class AiServices<T> {
     protected void performBasicValidation() {
         if (context.chatModel == null && context.streamingChatModel == null) {
             throw illegalConfiguration("Please specify either chatLanguageModel or streamingChatLanguageModel");
-        }
-
-        if (context.toolSpecifications != null && !context.hasChatMemory()) {
-            throw illegalConfiguration(
-                    "Please set up chatMemory or chatMemoryProvider in order to use tools. "
-                            + "A ChatMemory that can hold at least 3 messages is required for the tools to work properly. "
-                            + "While the LLM can technically execute a tool without chat memory, if it only receives the " +
-                            "result of the tool's execution without the initial message from the user, it won't interpret " +
-                            "the result properly."
-            );
         }
     }
 
@@ -340,7 +449,8 @@ public abstract class AiServices<T> {
             try {
                 Moderation moderation = moderationFuture.get();
                 if (moderation.flagged()) {
-                    throw new ModerationException(String.format("Text \"%s\" violates content policy", moderation.flaggedText()));
+                    throw new ModerationException(
+                            String.format("Text \"%s\" violates content policy", moderation.flaggedText()));
                 }
             } catch (InterruptedException | ExecutionException e) {
                 throw new RuntimeException(e);

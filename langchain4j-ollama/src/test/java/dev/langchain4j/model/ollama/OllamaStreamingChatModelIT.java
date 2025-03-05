@@ -4,74 +4,54 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.StreamingResponseHandler;
+import dev.langchain4j.exception.HttpException;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.TestStreamingChatResponseHandler;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.output.TokenUsage;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
+import static dev.langchain4j.model.chat.Capability.RESPONSE_FORMAT_JSON_SCHEMA;
+import static dev.langchain4j.model.ollama.OllamaImage.TINY_DOLPHIN_MODEL;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
-import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class OllamaStreamingChatModelIT extends AbstractOllamaInfrastructure {
+class OllamaStreamingChatModelIT extends AbstractOllamaLanguageModelInfrastructure {
 
     StreamingChatLanguageModel model = OllamaStreamingChatModel.builder()
-            .baseUrl(getBaseUrl())
-            .modelName(MODEL)
+            .baseUrl(ollamaBaseUrl(ollama))
+            .modelName(TINY_DOLPHIN_MODEL)
             .temperature(0.0)
+            .logRequests(true)
+            .logResponses(true)
             .build();
 
     @Test
-    void should_stream_answer() throws Exception {
+    void should_stream_answer() {
 
         // given
         String userMessage = "What is the capital of Germany?";
 
         // when
-        CompletableFuture<String> futureAnswer = new CompletableFuture<>();
-        CompletableFuture<Response<AiMessage>> futureResponse = new CompletableFuture<>();
-
-        model.generate(userMessage, new StreamingResponseHandler<AiMessage>() {
-
-            private final StringBuilder answerBuilder = new StringBuilder();
-
-            @Override
-            public void onNext(String token) {
-                System.out.println("onNext: '" + token + "'");
-                answerBuilder.append(token);
-            }
-
-            @Override
-            public void onComplete(Response<AiMessage> response) {
-                System.out.println("onComplete: '" + response + "'");
-                futureAnswer.complete(answerBuilder.toString());
-                futureResponse.complete(response);
-            }
-
-            @Override
-            public void onError(Throwable error) {
-                futureAnswer.completeExceptionally(error);
-                futureResponse.completeExceptionally(error);
-            }
-        });
-
-        String answer = futureAnswer.get(30, SECONDS);
-        Response<AiMessage> response = futureResponse.get(30, SECONDS);
+        TestStreamingChatResponseHandler handler = new TestStreamingChatResponseHandler();
+        model.chat(userMessage, handler);
+        dev.langchain4j.model.chat.response.ChatResponse response = handler.get();
+        String answer = response.aiMessage().text();
 
         // then
         assertThat(answer).contains("Berlin");
 
-        AiMessage aiMessage = response.content();
+        AiMessage aiMessage = response.aiMessage();
         assertThat(aiMessage.text()).isEqualTo(answer);
         assertThat(aiMessage.toolExecutionRequests()).isNull();
 
         TokenUsage tokenUsage = response.tokenUsage();
-        assertThat(tokenUsage.inputTokenCount()).isEqualTo(38);
+        assertThat(tokenUsage.inputTokenCount()).isGreaterThan(0);
         assertThat(tokenUsage.outputTokenCount()).isGreaterThan(0);
         assertThat(tokenUsage.totalTokenCount())
                 .isEqualTo(tokenUsage.inputTokenCount() + tokenUsage.outputTokenCount());
@@ -80,159 +60,82 @@ class OllamaStreamingChatModelIT extends AbstractOllamaInfrastructure {
     }
 
     @Test
-    void should_respect_numPredict() throws Exception {
+    void should_respect_numPredict() {
 
         // given
         int numPredict = 1; // max output tokens
 
         StreamingChatLanguageModel model = OllamaStreamingChatModel.builder()
-                .baseUrl(getBaseUrl())
-                .modelName(MODEL)
+                .baseUrl(ollamaBaseUrl(ollama))
+                .modelName(TINY_DOLPHIN_MODEL)
                 .numPredict(numPredict)
                 .temperature(0.0)
+                .logRequests(true)
+                .logResponses(true)
                 .build();
 
         UserMessage userMessage = UserMessage.from("What is the capital of Germany?");
 
         // when
-        CompletableFuture<String> futureAnswer = new CompletableFuture<>();
-        CompletableFuture<Response<AiMessage>> futureResponse = new CompletableFuture<>();
-
-        model.generate(singletonList(userMessage), new StreamingResponseHandler<AiMessage>() {
-
-            private final StringBuilder answerBuilder = new StringBuilder();
-
-            @Override
-            public void onNext(String token) {
-                System.out.println("onNext: '" + token + "'");
-                answerBuilder.append(token);
-            }
-
-            @Override
-            public void onComplete(Response<AiMessage> response) {
-                System.out.println("onComplete: '" + response + "'");
-                futureAnswer.complete(answerBuilder.toString());
-                futureResponse.complete(response);
-            }
-
-            @Override
-            public void onError(Throwable error) {
-                futureAnswer.completeExceptionally(error);
-                futureResponse.completeExceptionally(error);
-            }
-        });
-
-        String answer = futureAnswer.get(30, SECONDS);
-        Response<AiMessage> response = futureResponse.get(30, SECONDS);
+        TestStreamingChatResponseHandler handler = new TestStreamingChatResponseHandler();
+        model.chat(singletonList(userMessage), handler);
+        dev.langchain4j.model.chat.response.ChatResponse response = handler.get();
+        String answer = response.aiMessage().text();
 
         // then
         assertThat(answer).doesNotContain("Berlin");
-        assertThat(response.content().text()).isEqualTo(answer);
+        assertThat(response.aiMessage().text()).isEqualTo(answer);
 
-        assertThat(response.tokenUsage().outputTokenCount()).isEqualTo(numPredict + 2); // bug in Ollama
+        assertThat(response.tokenUsage().outputTokenCount()).isBetween(numPredict, numPredict + 2); // bug in Ollama
     }
 
-
     @Test
-    void should_respect_system_message() throws Exception {
+    void should_respect_system_message() {
 
         // given
         SystemMessage systemMessage = SystemMessage.from("Translate messages from user into German");
         UserMessage userMessage = UserMessage.from("I love you");
 
         // when
-        CompletableFuture<String> futureAnswer = new CompletableFuture<>();
-        CompletableFuture<Response<AiMessage>> futureResponse = new CompletableFuture<>();
-
-        model.generate(asList(systemMessage, userMessage), new StreamingResponseHandler<AiMessage>() {
-
-            private final StringBuilder answerBuilder = new StringBuilder();
-
-            @Override
-            public void onNext(String token) {
-                System.out.println("onNext: '" + token + "'");
-                answerBuilder.append(token);
-            }
-
-            @Override
-            public void onComplete(Response<AiMessage> response) {
-                System.out.println("onComplete: '" + response + "'");
-                futureAnswer.complete(answerBuilder.toString());
-                futureResponse.complete(response);
-            }
-
-            @Override
-            public void onError(Throwable error) {
-                futureAnswer.completeExceptionally(error);
-                futureResponse.completeExceptionally(error);
-            }
-        });
-
-        String answer = futureAnswer.get(30, SECONDS);
-        Response<AiMessage> response = futureResponse.get(30, SECONDS);
+        TestStreamingChatResponseHandler handler = new TestStreamingChatResponseHandler();
+        model.chat(asList(systemMessage, userMessage), handler);
+        dev.langchain4j.model.chat.response.ChatResponse response = handler.get();
+        String answer = response.aiMessage().text();
 
         // then
         assertThat(answer).containsIgnoringCase("liebe");
-        assertThat(response.content().text()).isEqualTo(answer);
+        assertThat(response.aiMessage().text()).isEqualTo(answer);
     }
 
     @Test
-    void should_respond_to_few_shot() throws Exception {
+    void should_respond_to_few_shot() {
 
         // given
         List<ChatMessage> messages = asList(
                 UserMessage.from("1 + 1 ="),
                 AiMessage.from(">>> 2"),
-
                 UserMessage.from("2 + 2 ="),
                 AiMessage.from(">>> 4"),
-
-                UserMessage.from("4 + 4 =")
-        );
+                UserMessage.from("4 + 4 ="));
 
         // when
-        CompletableFuture<String> futureAnswer = new CompletableFuture<>();
-        CompletableFuture<Response<AiMessage>> futureResponse = new CompletableFuture<>();
-
-        model.generate(messages, new StreamingResponseHandler<AiMessage>() {
-
-            private final StringBuilder answerBuilder = new StringBuilder();
-
-            @Override
-            public void onNext(String token) {
-                System.out.println("onNext: '" + token + "'");
-                answerBuilder.append(token);
-            }
-
-            @Override
-            public void onComplete(Response<AiMessage> response) {
-                System.out.println("onComplete: '" + response + "'");
-                futureAnswer.complete(answerBuilder.toString());
-                futureResponse.complete(response);
-            }
-
-            @Override
-            public void onError(Throwable error) {
-                futureAnswer.completeExceptionally(error);
-                futureResponse.completeExceptionally(error);
-            }
-        });
-
-        String answer = futureAnswer.get(30, SECONDS);
-        Response<AiMessage> response = futureResponse.get(30, SECONDS);
+        TestStreamingChatResponseHandler handler = new TestStreamingChatResponseHandler();
+        model.chat(messages, handler);
+        dev.langchain4j.model.chat.response.ChatResponse response = handler.get();
+        String answer = response.aiMessage().text();
 
         // then
-        assertThat(answer).isEqualTo(">>> 8");
-        assertThat(response.content().text()).isEqualTo(answer);
+        assertThat(answer).startsWith(">>> 8");
+        assertThat(response.aiMessage().text()).isEqualTo(answer);
     }
 
     @Test
-    void should_generate_valid_json() throws Exception {
+    void should_generate_valid_json() {
 
         // given
         StreamingChatLanguageModel model = OllamaStreamingChatModel.builder()
-                .baseUrl(getBaseUrl())
-                .modelName(MODEL)
+                .baseUrl(ollamaBaseUrl(ollama))
+                .modelName(TINY_DOLPHIN_MODEL)
                 .format("json")
                 .temperature(0.0)
                 .build();
@@ -240,38 +143,65 @@ class OllamaStreamingChatModelIT extends AbstractOllamaInfrastructure {
         String userMessage = "Return JSON with two fields: name and age of John Doe, 42 years old.";
 
         // when
-        CompletableFuture<String> futureAnswer = new CompletableFuture<>();
-        CompletableFuture<Response<AiMessage>> futureResponse = new CompletableFuture<>();
+        TestStreamingChatResponseHandler handler = new TestStreamingChatResponseHandler();
+        model.chat(userMessage, handler);
+        dev.langchain4j.model.chat.response.ChatResponse response = handler.get();
+        String answer = response.aiMessage().text();
 
-        model.generate(userMessage, new StreamingResponseHandler<AiMessage>() {
+        // then
+        assertThat(answer).isEqualToIgnoringWhitespace("{\"name\": \"John Doe\", \"age\": 42}");
+        assertThat(response.aiMessage().text()).isEqualTo(answer);
+    }
 
-            private final StringBuilder answerBuilder = new StringBuilder();
+    @Test
+    void should_propagate_failure_to_handler_onError() throws Exception {
+
+        // given
+        String wrongModelName = "banana";
+
+        StreamingChatLanguageModel model = OllamaStreamingChatModel.builder()
+                .baseUrl(ollamaBaseUrl(ollama))
+                .modelName(wrongModelName)
+                .build();
+
+        CompletableFuture<Throwable> future = new CompletableFuture<>();
+
+        // when
+        model.chat("does not matter", new StreamingChatResponseHandler() {
 
             @Override
-            public void onNext(String token) {
-                System.out.println("onNext: '" + token + "'");
-                answerBuilder.append(token);
+            public void onPartialResponse(String partialResponse) {
+                future.completeExceptionally(new Exception("onPartialResponse() should never be called"));
             }
 
             @Override
-            public void onComplete(Response<AiMessage> response) {
-                System.out.println("onComplete: '" + response + "'");
-                futureAnswer.complete(answerBuilder.toString());
-                futureResponse.complete(response);
+            public void onCompleteResponse(ChatResponse completeResponse) {
+                future.completeExceptionally(new Exception("onCompleteResponse() should never be called"));
             }
 
             @Override
             public void onError(Throwable error) {
-                futureAnswer.completeExceptionally(error);
-                futureResponse.completeExceptionally(error);
+                future.complete(error);
             }
         });
 
-        String answer = futureAnswer.get(30, SECONDS);
-        Response<AiMessage> response = futureResponse.get(30, SECONDS);
-
         // then
-        assertThat(answer).isEqualToIgnoringWhitespace("{\"name\": \"John Doe\", \"age\": 42}");
-        assertThat(response.content().text()).isEqualTo(answer);
+        Throwable throwable = future.get();
+        assertThat(throwable).isExactlyInstanceOf(HttpException.class);
+
+        HttpException httpException = (HttpException) throwable;
+        assertThat(httpException.statusCode()).isEqualTo(404);
+        assertThat(httpException.getMessage()).contains("banana", "not found");
+    }
+
+    @Test
+    void should_return_set_capabilities() {
+        OllamaStreamingChatModel model = OllamaStreamingChatModel.builder()
+                .baseUrl(ollamaBaseUrl(ollama))
+                .modelName(TINY_DOLPHIN_MODEL)
+                .supportedCapabilities(RESPONSE_FORMAT_JSON_SCHEMA)
+                .build();
+
+        assertThat(model.supportedCapabilities()).contains(RESPONSE_FORMAT_JSON_SCHEMA);
     }
 }

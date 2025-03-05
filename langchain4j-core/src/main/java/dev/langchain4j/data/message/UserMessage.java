@@ -1,18 +1,28 @@
 package dev.langchain4j.data.message;
 
+import dev.langchain4j.Experimental;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 import static dev.langchain4j.data.message.ChatMessageType.USER;
 import static dev.langchain4j.internal.Exceptions.runtime;
 import static dev.langchain4j.internal.Utils.quoted;
-import static dev.langchain4j.internal.ValidationUtils.ensureNotBlank;
 import static dev.langchain4j.internal.ValidationUtils.ensureNotEmpty;
 import static java.util.Arrays.asList;
 import static java.util.Collections.unmodifiableList;
 
 /**
  * Represents a message from a user, typically an end user of the application.
+ * <br>
+ * Depending on the supported modalities (text, image, audio, video, etc.) of the model,
+ * user messages can contain either a single text (a {@code String}) or multiple {@link Content}s,
+ * which can be either {@link TextContent}, {@link ImageContent}, {@link AudioContent},
+ * {@link VideoContent}, {@link PdfFileContent}, or {@link TextFileContent}.
+ * <br>
+ * Optionally, user message can contain a {@link #name} of the user.
+ * Be aware that not all models support names in {@code UserMessage}.
  */
 public class UserMessage implements ChatMessage {
 
@@ -21,6 +31,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Creates a {@link UserMessage} from a text.
+     *
      * @param text the text.
      */
     public UserMessage(String text) {
@@ -29,6 +40,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Creates a {@link UserMessage} from a name and a text.
+     *
      * @param name the name.
      * @param text the text.
      */
@@ -37,9 +49,9 @@ public class UserMessage implements ChatMessage {
     }
 
     /**
-     * Creates a {@link UserMessage} from contents.
-     *
-     * <p>Will have a {code null} name.</p>
+     * Creates a {@link UserMessage} from one or multiple {@link Content}s.
+     * <br>
+     * Will have a {@code null} name.
      *
      * @param contents the contents.
      */
@@ -48,8 +60,9 @@ public class UserMessage implements ChatMessage {
     }
 
     /**
-     * Creates a {@link UserMessage} from a name and contents.
-     * @param name the name.
+     * Creates a {@link UserMessage} from a name and one or multiple {@link Content}s.
+     *
+     * @param name     the name.
      * @param contents the contents.
      */
     public UserMessage(String name, Content... contents) {
@@ -57,9 +70,9 @@ public class UserMessage implements ChatMessage {
     }
 
     /**
-     * Creates a {@link UserMessage} from contents.
-     *
-     * <p>Will have a {code null} name.</p>
+     * Creates a {@link UserMessage} from a list of {@link Content}s.
+     * <br>
+     * Will have a {@code null} name.
      *
      * @param contents the contents.
      */
@@ -69,18 +82,19 @@ public class UserMessage implements ChatMessage {
     }
 
     /**
-     * Creates a {@link UserMessage} from a name and contents.
+     * Creates a {@link UserMessage} from a name and a list of {@link Content}s.
      *
-     * @param name the name.
+     * @param name     the name.
      * @param contents the contents.
      */
     public UserMessage(String name, List<Content> contents) {
-        this.name = ensureNotBlank(name, "name");
+        this.name = name;
         this.contents = unmodifiableList(ensureNotEmpty(contents, "contents"));
     }
 
     /**
      * The name of the user.
+     *
      * @return the name, or {@code null} if not set.
      */
     public String name() {
@@ -88,15 +102,24 @@ public class UserMessage implements ChatMessage {
     }
 
     /**
-     * The contents of the message.
+     * The {@link Content}s of the message.
+     *
      * @return the contents.
      */
     public List<Content> contents() {
         return contents;
     }
 
-    @Deprecated
-    public String text() {
+    /**
+     * Returns text from a single {@link TextContent}.
+     * Use this accessor only if you are certain that the message contains only a single text.
+     * If the message contains multiple {@link Content}s, or if the only {@link Content} is not a {@link TextContent},
+     * a {@link RuntimeException} is thrown.
+     *
+     * @return a single text.
+     * @see #hasSingleText()
+     */
+    public String singleText() {
         if (hasSingleText()) {
             return ((TextContent) contents.get(0)).text();
         } else {
@@ -105,11 +128,24 @@ public class UserMessage implements ChatMessage {
     }
 
     /**
-     * Whether this message has a single text content.
-     * @return {@code true} if this message has a single text content, {@code false} otherwise.
+     * Whether this message contains a single {@link TextContent}.
+     *
+     * @return {@code true} if this message contains a single {@link TextContent}, {@code false} otherwise.
      */
     public boolean hasSingleText() {
         return contents.size() == 1 && contents.get(0) instanceof TextContent;
+    }
+
+    /**
+     * {@link UserMessage} can contain not just a single {@code String text}, but also multiple {@link Content}s.
+     * Therefore, this method is deprecated. Please use {@link #singleText()} if you only expect a single text,
+     * or use {@link #contents()} otherwise.
+     *
+     * @deprecated Use {@link #singleText()} or {@link #contents()} instead.
+     */
+    @Deprecated(forRemoval = true)
+    public String text() {
+        return singleText();
     }
 
     @Override
@@ -139,8 +175,42 @@ public class UserMessage implements ChatMessage {
                 " }";
     }
 
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+
+        private String name;
+        private List<Content> contents;
+
+        public Builder name(String name) {
+            this.name = name;
+            return this;
+        }
+
+        public Builder contents(List<Content> contents) {
+            this.contents = contents;
+            return this;
+        }
+
+        @Experimental
+        public Builder addContent(Content content) {
+            if (this.contents == null) {
+                this.contents = new ArrayList<>();
+            }
+            this.contents.add(content);
+            return this;
+        }
+
+        public UserMessage build() {
+            return new UserMessage(name, contents);
+        }
+    }
+
     /**
      * Create a {@link UserMessage} from a text.
+     *
      * @param text the text.
      * @return the {@link UserMessage}.
      */
@@ -150,6 +220,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from a name and a text.
+     *
      * @param name the name.
      * @param text the text.
      * @return the {@link UserMessage}.
@@ -160,6 +231,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from contents.
+     *
      * @param contents the contents.
      * @return the {@link UserMessage}.
      */
@@ -169,7 +241,8 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from a name and contents.
-     * @param name the name.
+     *
+     * @param name     the name.
      * @param contents the contents.
      * @return the {@link UserMessage}.
      */
@@ -179,6 +252,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from contents.
+     *
      * @param contents the contents.
      * @return the {@link UserMessage}.
      */
@@ -188,7 +262,8 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from a name and contents.
-     * @param name the name.
+     *
+     * @param name     the name.
      * @param contents the contents.
      * @return the {@link UserMessage}.
      */
@@ -198,6 +273,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from a text.
+     *
      * @param text the text.
      * @return the {@link UserMessage}.
      */
@@ -207,6 +283,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from a name and a text.
+     *
      * @param name the name.
      * @param text the text.
      * @return the {@link UserMessage}.
@@ -217,6 +294,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from contents.
+     *
      * @param contents the contents.
      * @return the {@link UserMessage}.
      */
@@ -226,7 +304,8 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from a name and contents.
-     * @param name the name.
+     *
+     * @param name     the name.
      * @param contents the contents.
      * @return the {@link UserMessage}.
      */
@@ -236,6 +315,7 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from contents.
+     *
      * @param contents the contents.
      * @return the {@link UserMessage}.
      */
@@ -245,7 +325,8 @@ public class UserMessage implements ChatMessage {
 
     /**
      * Create a {@link UserMessage} from a name and contents.
-     * @param name the name.
+     *
+     * @param name     the name.
      * @param contents the contents.
      * @return the {@link UserMessage}.
      */

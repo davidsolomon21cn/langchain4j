@@ -1,11 +1,12 @@
 package dev.langchain4j.model.localai;
 
-import dev.ai4j.openai4j.OpenAiClient;
-import dev.ai4j.openai4j.embedding.EmbeddingRequest;
-import dev.ai4j.openai4j.embedding.EmbeddingResponse;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.DimensionAwareEmbeddingModel;
+import dev.langchain4j.model.localai.spi.LocalAiEmbeddingModelBuilderFactory;
+import dev.langchain4j.model.openai.internal.OpenAiClient;
+import dev.langchain4j.model.openai.internal.embedding.EmbeddingRequest;
+import dev.langchain4j.model.openai.internal.embedding.EmbeddingResponse;
 import dev.langchain4j.model.output.Response;
 import lombok.Builder;
 
@@ -14,13 +15,14 @@ import java.util.List;
 
 import static dev.langchain4j.internal.RetryUtils.withRetry;
 import static dev.langchain4j.internal.ValidationUtils.ensureNotBlank;
+import static dev.langchain4j.spi.ServiceHelper.loadFactories;
 import static java.time.Duration.ofSeconds;
 import static java.util.stream.Collectors.toList;
 
 /**
  * See <a href="https://localai.io/features/embeddings/">LocalAI documentation</a> for more details.
  */
-public class LocalAiEmbeddingModel implements EmbeddingModel {
+public class LocalAiEmbeddingModel extends DimensionAwareEmbeddingModel {
 
     private final OpenAiClient client;
     private final String modelName;
@@ -38,12 +40,9 @@ public class LocalAiEmbeddingModel implements EmbeddingModel {
         maxRetries = maxRetries == null ? 3 : maxRetries;
 
         this.client = OpenAiClient.builder()
-                .openAiApiKey("ignored")
                 .baseUrl(ensureNotBlank(baseUrl, "baseUrl"))
-                .callTimeout(timeout)
                 .connectTimeout(timeout)
                 .readTimeout(timeout)
-                .writeTimeout(timeout)
                 .logRequests(logRequests)
                 .logResponses(logResponses)
                 .build();
@@ -70,5 +69,19 @@ public class LocalAiEmbeddingModel implements EmbeddingModel {
                 .collect(toList());
 
         return Response.from(embeddings);
+    }
+
+    public static LocalAiEmbeddingModelBuilder builder() {
+        for (LocalAiEmbeddingModelBuilderFactory factory : loadFactories(LocalAiEmbeddingModelBuilderFactory.class)) {
+            return factory.get();
+        }
+        return new LocalAiEmbeddingModelBuilder();
+    }
+
+    public static class LocalAiEmbeddingModelBuilder {
+        public LocalAiEmbeddingModelBuilder() {
+            // This is public so it can be extended
+            // By default with Lombok it becomes package private
+        }
     }
 }

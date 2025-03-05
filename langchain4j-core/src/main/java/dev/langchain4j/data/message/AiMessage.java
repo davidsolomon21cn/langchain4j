@@ -6,10 +6,11 @@ import java.util.List;
 import java.util.Objects;
 
 import static dev.langchain4j.data.message.ChatMessageType.AI;
+import static dev.langchain4j.internal.Utils.copyIfNotNull;
 import static dev.langchain4j.internal.Utils.isNullOrEmpty;
 import static dev.langchain4j.internal.Utils.quoted;
-import static dev.langchain4j.internal.ValidationUtils.ensureNotBlank;
 import static dev.langchain4j.internal.ValidationUtils.ensureNotEmpty;
+import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
 import static java.util.Arrays.asList;
 
 /**
@@ -24,15 +25,17 @@ public class AiMessage implements ChatMessage {
 
     /**
      * Create a new {@link AiMessage} with the given text.
+     *
      * @param text the text of the message.
      */
     public AiMessage(String text) {
-        this.text = ensureNotBlank(text, "text");
+        this.text = ensureNotNull(text, "text");
         this.toolExecutionRequests = null;
     }
 
     /**
      * Create a new {@link AiMessage} with the given tool execution requests.
+     *
      * @param toolExecutionRequests the tool execution requests of the message.
      */
     public AiMessage(List<ToolExecutionRequest> toolExecutionRequests) {
@@ -41,7 +44,19 @@ public class AiMessage implements ChatMessage {
     }
 
     /**
+     * Create a new {@link AiMessage} with the given text and tool execution requests.
+     *
+     * @param text                  the text of the message.
+     * @param toolExecutionRequests the tool execution requests of the message.
+     */
+    public AiMessage(String text, List<ToolExecutionRequest> toolExecutionRequests) {
+        this.text = text;
+        this.toolExecutionRequests = copyIfNotNull(toolExecutionRequests);
+    }
+
+    /**
      * Get the text of the message.
+     *
      * @return the text of the message.
      */
     public String text() {
@@ -50,6 +65,7 @@ public class AiMessage implements ChatMessage {
 
     /**
      * Get the tool execution requests of the message.
+     *
      * @return the tool execution requests of the message.
      */
     public List<ToolExecutionRequest> toolExecutionRequests() {
@@ -58,6 +74,7 @@ public class AiMessage implements ChatMessage {
 
     /**
      * Check if the message has ToolExecutionRequests.
+     *
      * @return true if the message has ToolExecutionRequests, false otherwise.
      */
     public boolean hasToolExecutionRequests() {
@@ -91,8 +108,33 @@ public class AiMessage implements ChatMessage {
                 " }";
     }
 
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+
+        private String text;
+        private List<ToolExecutionRequest> toolExecutionRequests;
+
+        public Builder text(String text) {
+            this.text = text;
+            return this;
+        }
+
+        public Builder toolExecutionRequests(List<ToolExecutionRequest> toolExecutionRequests) {
+            this.toolExecutionRequests = toolExecutionRequests;
+            return this;
+        }
+
+        public AiMessage build() {
+            return new AiMessage(text, toolExecutionRequests);
+        }
+    }
+
     /**
      * Create a new {@link AiMessage} with the given text.
+     *
      * @param text the text of the message.
      * @return the new {@link AiMessage}.
      */
@@ -102,6 +144,7 @@ public class AiMessage implements ChatMessage {
 
     /**
      * Create a new {@link AiMessage} with the given tool execution requests.
+     *
      * @param toolExecutionRequests the tool execution requests of the message.
      * @return the new {@link AiMessage}.
      */
@@ -111,6 +154,7 @@ public class AiMessage implements ChatMessage {
 
     /**
      * Create a new {@link AiMessage} with the given tool execution requests.
+     *
      * @param toolExecutionRequests the tool execution requests of the message.
      * @return the new {@link AiMessage}.
      */
@@ -119,7 +163,19 @@ public class AiMessage implements ChatMessage {
     }
 
     /**
+     * Create a new {@link AiMessage} with the given text and tool execution requests.
+     *
+     * @param text                  the text of the message.
+     * @param toolExecutionRequests the tool execution requests of the message.
+     * @return the new {@link AiMessage}.
+     */
+    public static AiMessage from(String text, List<ToolExecutionRequest> toolExecutionRequests) {
+        return new AiMessage(text, toolExecutionRequests);
+    }
+
+    /**
      * Create a new {@link AiMessage} with the given text.
+     *
      * @param text the text of the message.
      * @return the new {@link AiMessage}.
      */
@@ -129,6 +185,7 @@ public class AiMessage implements ChatMessage {
 
     /**
      * Create a new {@link AiMessage} with the given tool execution requests.
+     *
      * @param toolExecutionRequests the tool execution requests of the message.
      * @return the new {@link AiMessage}.
      */
@@ -138,10 +195,22 @@ public class AiMessage implements ChatMessage {
 
     /**
      * Create a new {@link AiMessage} with the given tool execution requests.
+     *
      * @param toolExecutionRequests the tool execution requests of the message.
      * @return the new {@link AiMessage}.
      */
     public static AiMessage aiMessage(List<ToolExecutionRequest> toolExecutionRequests) {
         return from(toolExecutionRequests);
+    }
+
+    /**
+     * Create a new {@link AiMessage} with the given text and tool execution requests.
+     *
+     * @param text                  the text of the message.
+     * @param toolExecutionRequests the tool execution requests of the message.
+     * @return the new {@link AiMessage}.
+     */
+    public static AiMessage aiMessage(String text, List<ToolExecutionRequest> toolExecutionRequests) {
+        return from(text, toolExecutionRequests);
     }
 }

@@ -1,14 +1,19 @@
 package dev.langchain4j.agent.tool;
 
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.model.chat.request.json.JsonSchemaElement;
+import dev.langchain4j.model.chat.request.json.JsonSchemaElementHelper;
+
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
-import java.math.BigDecimal;
-import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
-import static dev.langchain4j.agent.tool.JsonSchemaProperty.*;
 import static dev.langchain4j.internal.Utils.isNullOrBlank;
 import static java.util.Arrays.stream;
 import static java.util.stream.Collectors.toList;
@@ -17,102 +22,128 @@ import static java.util.stream.Collectors.toList;
  * Utility methods for {@link ToolSpecification}s.
  */
 public class ToolSpecifications {
-    private ToolSpecifications() {}
+
+    private ToolSpecifications() {
+    }
 
     /**
-     * Get the {@link ToolSpecification}s for each {@link Tool} method of the given object.
+     * Returns {@link ToolSpecification}s for all methods annotated with @{@link Tool} within the specified class.
+     *
+     * @param classWithTools the class.
+     * @return the {@link ToolSpecification}s.
+     */
+    public static List<ToolSpecification> toolSpecificationsFrom(Class<?> classWithTools) {
+        List<ToolSpecification> toolSpecifications = stream(classWithTools.getDeclaredMethods())
+                .filter(method -> method.isAnnotationPresent(Tool.class))
+                .map(ToolSpecifications::toolSpecificationFrom)
+                .collect(toList());
+        validateSpecifications(toolSpecifications);
+        return toolSpecifications;
+    }
+
+    /**
+     * Returns {@link ToolSpecification}s for all methods annotated with @{@link Tool}
+     * within the class of the specified object.
+     *
      * @param objectWithTools the object.
      * @return the {@link ToolSpecification}s.
      */
     public static List<ToolSpecification> toolSpecificationsFrom(Object objectWithTools) {
-        return stream(objectWithTools.getClass().getDeclaredMethods())
-                .filter(method -> method.isAnnotationPresent(Tool.class))
-                .map(ToolSpecifications::toolSpecificationFrom)
-                .collect(toList());
+        return toolSpecificationsFrom(objectWithTools.getClass());
     }
 
     /**
-     * Get the {@link ToolSpecification} for the given {@link Tool} method.
+     * Validates all the {@link ToolSpecification}s. The validation checks for duplicate method names.
+     * Throws {@link IllegalArgumentException} if validation fails
+     *
+     * @param toolSpecifications list of ToolSpecification to be validated.
+     */
+    public static void validateSpecifications(List<ToolSpecification> toolSpecifications) throws IllegalArgumentException {
+
+        // Checks for duplicates methods
+        Set<String> names = new HashSet<>();
+        for (ToolSpecification toolSpecification : toolSpecifications) {
+            if (!names.add(toolSpecification.name())) {
+                throw new IllegalArgumentException(String.format("Tool names must be unique. The tool '%s' appears several times", toolSpecification.name()));
+            }
+        }
+    }
+
+    /**
+     * Returns the {@link ToolSpecification} for the given method annotated with @{@link Tool}.
+     *
      * @param method the method.
      * @return the {@link ToolSpecification}.
      */
     public static ToolSpecification toolSpecificationFrom(Method method) {
+
         Tool annotation = method.getAnnotation(Tool.class);
 
         String name = isNullOrBlank(annotation.name()) ? method.getName() : annotation.name();
+
         String description = String.join("\n", annotation.value());
+        if (description.isEmpty()) {
+            description = null;
+        }
 
-        ToolSpecification.Builder builder = ToolSpecification.builder()
+        JsonObjectSchema parameters = parametersFrom(method.getParameters());
+
+        return ToolSpecification.builder()
                 .name(name)
-                .description(description);
+                .description(description)
+                .parameters(parameters)
+                .build();
+    }
 
-        for (Parameter parameter : method.getParameters()) {
+    private static JsonObjectSchema parametersFrom(Parameter[] parameters) {
+
+        Map<String, JsonSchemaElement> properties = new LinkedHashMap<>();
+        List<String> required = new ArrayList<>();
+
+        Map<Class<?>, JsonSchemaElementHelper.VisitedClassMetadata> visited = new LinkedHashMap<>();
+
+        for (Parameter parameter : parameters) {
             if (parameter.isAnnotationPresent(ToolMemoryId.class)) {
                 continue;
             }
-            builder.addParameter(parameter.getName(), toJsonSchemaProperties(parameter));
+
+            boolean isRequired = Optional.ofNullable(parameter.getAnnotation(P.class))
+                    .map(P::required)
+                    .orElse(true);
+
+            properties.put(parameter.getName(), jsonSchemaElementFrom(parameter, visited));
+            if (isRequired) {
+                required.add(parameter.getName());
+            }
         }
 
-        return builder.build();
+        Map<String, JsonSchemaElement> definitions = new LinkedHashMap<>();
+        visited.forEach((clazz, visitedClassMetadata) -> {
+            if (visitedClassMetadata.recursionDetected) {
+                definitions.put(visitedClassMetadata.reference, visitedClassMetadata.jsonSchemaElement);
+            }
+        });
+
+        if (properties.isEmpty()) {
+            return null;
+        }
+
+        return JsonObjectSchema.builder()
+                .addProperties(properties)
+                .required(required)
+                .definitions(definitions.isEmpty() ? null : definitions)
+                .build();
     }
 
-    /**
-     * Convert a {@link Parameter} to a {@link JsonSchemaProperty}.
-     *
-     * @param parameter the parameter.
-     * @return the {@link JsonSchemaProperty}.
-     */
-    static Iterable<JsonSchemaProperty> toJsonSchemaProperties(Parameter parameter) {
-
-        Class<?> type = parameter.getType();
-
+    private static JsonSchemaElement jsonSchemaElementFrom(Parameter parameter,
+                                                           Map<Class<?>, JsonSchemaElementHelper.VisitedClassMetadata> visited) {
         P annotation = parameter.getAnnotation(P.class);
-        JsonSchemaProperty description = annotation == null ? null : description(annotation.value());
-
-        if (type == String.class) {
-            return removeNulls(STRING, description);
-        }
-
-        if (type == boolean.class || type == Boolean.class) {
-            return removeNulls(BOOLEAN, description);
-        }
-
-        if (type == byte.class || type == Byte.class
-                || type == short.class || type == Short.class
-                || type == int.class || type == Integer.class
-                || type == long.class || type == Long.class
-                || type == BigInteger.class) {
-            return removeNulls(INTEGER, description);
-        }
-
-        // TODO put constraints on min and max?
-        if (type == float.class || type == Float.class
-                || type == double.class || type == Double.class
-                || type == BigDecimal.class) {
-            return removeNulls(NUMBER, description);
-        }
-
-        if (type.isArray()
-                || type == List.class
-                || type == Set.class) { // TODO something else?
-            return removeNulls(ARRAY, description); // TODO provide type of array?
-        }
-
-        if (type.isEnum()) {
-            return removeNulls(STRING, enums((Object[]) type.getEnumConstants()), description);
-        }
-
-        return removeNulls(OBJECT, description); // TODO provide internals
-    }
-
-    /**
-     * Remove nulls from the given array.
-     * @param items the array
-     * @return an iterable of the non-null items.
-     */
-    static Iterable<JsonSchemaProperty> removeNulls(JsonSchemaProperty... items) {
-        return stream(items)
-                .filter(Objects::nonNull)
-                .collect(toList());
+        String description = annotation == null ? null : annotation.value();
+        return JsonSchemaElementHelper.jsonSchemaElementFrom(
+                parameter.getType(),
+                parameter.getParameterizedType(),
+                description,
+                visited
+        );
     }
 }

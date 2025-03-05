@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 
 class TextSegmentTest implements WithAssertions {
     @Test
-    public void test_blank() {
+    void blank() {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(() -> TextSegment.from(" "))
                 .withMessageContaining("text cannot be null or blank");
@@ -20,17 +20,17 @@ class TextSegmentTest implements WithAssertions {
     }
 
     @Test
-    public void test_equals_hashCode() {
+    void equals_hash_code() {
         TextSegment ts1 = TextSegment.from("text");
         TextSegment ts2 = TextSegment.from("text");
 
         Metadata m1 = new Metadata();
-        m1.add("abc", "123");
+        m1.put("abc", "123");
         Metadata m2 = new Metadata();
-        m2.add("abc", "123");
+        m2.put("abc", "123");
 
         Metadata m3 = new Metadata();
-        m3.add("abc", "xyz");
+        m3.put("abc", "xyz");
 
         TextSegment ts3 = TextSegment.from("text", m1);
         TextSegment ts4 = TextSegment.from("text", m1);
@@ -54,21 +54,20 @@ class TextSegmentTest implements WithAssertions {
     }
 
     @Test
-    public void test_accessors() {
+    void accessors() {
         Metadata metadata = new Metadata();
-        metadata.add("abc", "123");
+        metadata.put("abc", "123");
         TextSegment ts = TextSegment.from("text", metadata);
 
         assertThat(ts.text()).isEqualTo("text");
         assertThat(ts.metadata()).isEqualTo(metadata);
         assertThat(ts.metadata("abc")).isEqualTo("123");
 
-        assertThat(ts)
-                .hasToString("TextSegment { text = \"text\" metadata = {abc=123} }");
+        assertThat(ts).hasToString("TextSegment { text = \"text\" metadata = {abc=123} }");
     }
 
     @Test
-    public void test_builders() {
+    void builders() {
         assertThat(new TextSegment("abc", new Metadata()))
                 .isEqualTo(TextSegment.from("abc"))
                 .isEqualTo(TextSegment.textSegment("abc"))
@@ -76,11 +75,10 @@ class TextSegmentTest implements WithAssertions {
                 .isEqualTo(TextSegment.textSegment("abc", new Metadata()));
 
         Metadata metadata = new Metadata();
-        metadata.add("abc", "123");
+        metadata.put("abc", "123");
 
         assertThat(new TextSegment("abc", metadata))
                 .isEqualTo(TextSegment.from("abc", metadata))
                 .isEqualTo(TextSegment.textSegment("abc", metadata));
     }
-
 }

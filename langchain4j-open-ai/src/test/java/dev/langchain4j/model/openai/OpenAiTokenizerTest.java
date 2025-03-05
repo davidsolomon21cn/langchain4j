@@ -1,6 +1,5 @@
 package dev.langchain4j.model.openai;
 
-import dev.ai4j.openai4j.chat.ChatCompletionModel;
 import dev.langchain4j.model.Tokenizer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -9,7 +8,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import java.util.ArrayList;
 import java.util.List;
 
-import static dev.langchain4j.model.openai.OpenAiModelName.GPT_3_5_TURBO;
+import static dev.langchain4j.model.openai.OpenAiChatModelName.GPT_3_5_TURBO;
 import static dev.langchain4j.model.openai.OpenAiTokenizer.countArguments;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,6 +42,11 @@ class OpenAiTokenizerTest {
         assertThat(tokenizer.estimateTokenCountInText("Hello")).isEqualTo(1);
         assertThat(tokenizer.estimateTokenCountInText("Hello!")).isEqualTo(2);
         assertThat(tokenizer.estimateTokenCountInText("Hello, how are you?")).isEqualTo(6);
+
+        assertThat(tokenizer.estimateTokenCountInText("")).isZero();
+        assertThat(tokenizer.estimateTokenCountInText("\n")).isEqualTo(1);
+        assertThat(tokenizer.estimateTokenCountInText("\n\n")).isEqualTo(1);
+        assertThat(tokenizer.estimateTokenCountInText("\n \n\n")).isEqualTo(2);
     }
 
     @Test
@@ -71,11 +75,11 @@ class OpenAiTokenizerTest {
 
     @Test
     void should_count_arguments() {
-        assertThat(countArguments(null)).isEqualTo(0);
-        assertThat(countArguments("")).isEqualTo(0);
-        assertThat(countArguments(" ")).isEqualTo(0);
-        assertThat(countArguments("{}")).isEqualTo(0);
-        assertThat(countArguments("{ }")).isEqualTo(0);
+        assertThat(countArguments(null)).isZero();
+        assertThat(countArguments("")).isZero();
+        assertThat(countArguments(" ")).isZero();
+        assertThat(countArguments("{}")).isZero();
+        assertThat(countArguments("{ }")).isZero();
 
         assertThat(countArguments("{\"one\":1}")).isEqualTo(1);
         assertThat(countArguments("{\"one\": 1}")).isEqualTo(1);
@@ -91,11 +95,39 @@ class OpenAiTokenizerTest {
     }
 
     @ParameterizedTest
-    @EnumSource(ChatCompletionModel.class)
-    void should_support_all_models(ChatCompletionModel model) {
+    @EnumSource(OpenAiChatModelName.class)
+    void should_support_all_chat_model_names(OpenAiChatModelName modelName) {
 
         // given
-        Tokenizer tokenizer = new OpenAiTokenizer(model.toString());
+        Tokenizer tokenizer = new OpenAiTokenizer(modelName);
+
+        // when
+        int tokenCount = tokenizer.estimateTokenCountInText("a");
+
+        // then
+        assertThat(tokenCount).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(OpenAiEmbeddingModelName.class)
+    void should_support_all_embedding_model_names(OpenAiEmbeddingModelName modelName) {
+
+        // given
+        Tokenizer tokenizer = new OpenAiTokenizer(modelName);
+
+        // when
+        int tokenCount = tokenizer.estimateTokenCountInText("a");
+
+        // then
+        assertThat(tokenCount).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(OpenAiLanguageModelName.class)
+    void should_support_all_language_model_names(OpenAiLanguageModelName modelName) {
+
+        // given
+        Tokenizer tokenizer = new OpenAiTokenizer(modelName);
 
         // when
         int tokenCount = tokenizer.estimateTokenCountInText("a");
